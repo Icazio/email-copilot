@@ -1,0 +1,13 @@
+{
+  "id": "refund_auto_renewal_v1",
+  "scene": "refund",
+  "sub_scene": "auto_renewal",
+  "language": "en",
+  "opening": "Hi,",
+  "body_guidance": [
+    "We understand that you are contacting us regarding a refund request related to a recent renewal.",
+    "Do not confirm the refund before the order is manually checked.",
+    "Ask for the order number if it is missing."
+  ],
+  "closing": "Best regards,"
+}

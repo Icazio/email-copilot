@@ -1,0 +1,12 @@
+{
+  "id": "license_code_not_working_v1",
+  "scene": "account",
+  "sub_scene": "license_code_not_working",
+  "language": "en",
+  "opening": "Hi,",
+  "body_guidance": [
+    "We are sorry to hear that the license code is not working.",
+    "Ask for the order number, the code itself, and a screenshot of the error message."
+  ],
+  "closing": "Best regards,"
+}

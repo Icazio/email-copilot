@@ -1,0 +1,13 @@
+{
+  "id": "cancel_renewal_v1",
+  "scene": "cancel_renewal",
+  "sub_scene": "cancel_renewal",
+  "language": "en",
+  "opening": "Hi,",
+  "body_guidance": [
+    "If order status is PAID: acknowledge receipt and inform the customer they will be notified by email upon success.",
+    "If all orders are SUBSCRIPTION_CANCELLED: confirm that the subscription is already cancelled and no further charges will occur.",
+    "If no order found: ask the customer to confirm the email address used for the purchase."
+  ],
+  "closing": "Best regards,"
+}

@@ -1,0 +1,12 @@
+{
+  "id": "invoice_request_v1",
+  "scene": "invoice",
+  "sub_scene": "invoice_request",
+  "language": "en",
+  "opening": "Hi,",
+  "body_guidance": [
+    "We would be glad to help with your invoice request.",
+    "Ask for order details and billing information if they are missing."
+  ],
+  "closing": "Best regards,"
+}

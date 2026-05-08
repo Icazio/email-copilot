@@ -1,0 +1,10 @@
+{
+  "name": "email-copilot-mvp",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Zero-dependency browser extension and backend skeleton for an internal email support copilot.",
+  "scripts": {
+    "start": "node backend/server.js",
+    "check": "node --check backend/server.js && node --check backend/lib/helpers.js && node --check backend/lib/mock-engine.js && node --check backend/lib/deepseek-engine.js && node --check backend/lib/openai-engine.js"
+  }
+}

@@ -1,0 +1,102 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Email Copilot MVP</title>
+    <link rel="stylesheet" href="panel.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="header">
+        <div>
+          <h1>Email Copilot</h1>
+          <p>Read-only draft assistant for support emails</p>
+        </div>
+        <span id="status" class="badge">idle</span>
+      </header>
+
+      <section class="card">
+        <label for="backendUrl">Backend URL</label>
+        <input id="backendUrl" type="text" value="http://localhost:8787" />
+
+        <details>
+          <summary>Centuran Selectors</summary>
+
+          <label for="subjectSelectors">Subject Selectors</label>
+          <textarea id="subjectSelectors" rows="5"></textarea>
+
+          <label for="threadSelectors">Thread Container Selectors</label>
+          <textarea id="threadSelectors" rows="7"></textarea>
+
+          <label for="messageSelectors">Message Item Selectors</label>
+          <textarea id="messageSelectors" rows="6"></textarea>
+        </details>
+
+        <div class="actions">
+          <button id="captureBtn">Capture Thread</button>
+          <button id="orderSearchBtn">Search Orders</button>
+          <button id="orderSearchDebugBtn">OrderSearch Debug</button>
+          <button id="analyzeBtn">Analyze</button>
+          <button id="generateBtn">Generate Draft</button>
+          <button id="clearBtn">Clear</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <label for="subject">Subject</label>
+        <input id="subject" type="text" />
+
+        <label for="threadText">Email Thread</label>
+        <textarea id="threadText" rows="10"></textarea>
+
+        <label for="manualLookup">Manual Lookup Result</label>
+        <textarea id="manualLookup" rows="5" placeholder="Paste customer or order lookup results here..."></textarea>
+
+        <label for="replyInstructions">Reply Instructions</label>
+        <textarea
+          id="replyInstructions"
+          rows="4"
+          placeholder="Enter agent notes or reply requirements, for example: explain politely, do not promise refund, ask for order ID first."
+        ></textarea>
+
+        <div class="actions">
+          <button id="refineBtn">Refine Draft</button>
+          <button id="copyBtn">Copy Draft</button>
+        </div>
+      </section>
+
+      <section class="card">
+        <h2>Summary</h2>
+        <pre id="summary"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Extracted Fields</h2>
+        <pre id="fields"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Questions To Ask</h2>
+        <pre id="questions"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Next Step</h2>
+        <pre id="nextStep"></pre>
+      </section>
+
+      <section class="card">
+        <h2>Draft Reply</h2>
+        <textarea id="draftReply" rows="14"></textarea>
+      </section>
+
+      <section class="card">
+        <h2>Capture Debug</h2>
+        <pre id="debugInfo"></pre>
+      </section>
+    </div>
+
+    <script src="panel.js"></script>
+  </body>
+</html>

@@ -1,0 +1,13 @@
+{
+  "id": "technical_issue_collect_info_v1",
+  "scene": "technical",
+  "sub_scene": "collect_info",
+  "language": "en",
+  "opening": "Hi,",
+  "body_guidance": [
+    "We are sorry for the inconvenience.",
+    "Collect environment details, product version, reproduction steps, and screenshots before escalation.",
+    "Do not speculate about root cause."
+  ],
+  "closing": "Best regards,"
+}

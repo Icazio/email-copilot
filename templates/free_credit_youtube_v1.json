@@ -1,0 +1,12 @@
+{
+  "id": "free_credit_youtube_v1",
+  "scene": "free_credit",
+  "sub_scene": "youtube_screenshot_request",
+  "language": "en",
+  "opening": "Hi,",
+  "body_guidance": [
+    "Ask the customer to send a screenshot proving they subscribed to the YouTube channel.",
+    "If other valid channels were also provided, acknowledge them in the same reply."
+  ],
+  "closing": "Best regards,"
+}
