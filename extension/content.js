@@ -115,19 +115,7 @@
     return match ? decodeURIComponent(match[1]) : "";
   }
 
-  function collectStandardResponseLabels() {
-    const optionNodes = Array.from(
-      document.querySelectorAll("select[id^='ResponseID'] option, select[name='ResponseID'] option")
-    );
-
-    return optionNodes
-      .map((option) => cleanText(option.textContent || ""))
-      .filter((text) => text && text !== "-")
-      .filter((text, index, items) => items.indexOf(text) === index)
-      .slice(0, 80);
-  }
-
-  function extractEmailsFromText(text) {
+function extractEmailsFromText(text) {
     const matches = String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
     return matches
       .map((item) => cleanText(item).toLowerCase())
@@ -484,7 +472,6 @@
   async function collectZnunyThreadText() {
     const rows = collectZnunyRows();
     const fetchedBodies = await fetchArticleBodies(rows);
-    const standardResponses = collectStandardResponseLabels();
     const ticketSubject = collectZnunySubject().subject;
     const pageEmailCandidates = collectPageEmailCandidates();
     const readableThreadText = buildReadableZnunyThread(rows, fetchedBodies);
@@ -512,9 +499,7 @@
         customer_email_candidates: pageEmailCandidates,
         customer_email: pageEmailCandidates[0] || "",
         customer_id_email: collectCustomerIdFromSidebar(),
-        available_standard_responses: standardResponses
-      },
-      standardResponses
+      }
     };
   }
 
@@ -596,7 +581,7 @@
         .slice(0, 10)
         .map((item) => item.article_id || item.fetch_url || ""),
       customer_email_candidates: threadResult.structured?.customer_email_candidates || [],
-      standard_responses: threadResult.standardResponses || []
+      standard_responses: []
     };
   }
 

@@ -268,10 +268,6 @@ function inferIssueType(text) {
 }
 
 function suggestTemplateFromStructuredData(category, body, templates) {
-  const responses = (normalizeStructuredThread(body.thread_structured)?.available_standard_responses || []).map(
-    (item) => item.toLowerCase()
-  );
-
   if (category === "free_credit") {
     return findTemplateById("free_credit_youtube_v1", templates);
   }

@@ -73,9 +73,6 @@ function normalizeStructuredThread(thread) {
     page_type: normalizeText(thread.page_type || ""),
     ticket_subject: normalizeText(thread.ticket_subject || ""),
     active_article_body: normalizeText(thread.active_article_body || ""),
-    available_standard_responses: cleanArray(thread.available_standard_responses).map((item) =>
-      normalizeText(item)
-    ),
     articles: cleanArray(thread.articles).map((article) => ({
       number: normalizeText(article?.number || ""),
       direction: normalizeText(article?.direction || ""),
@@ -120,11 +117,6 @@ function buildStructuredThreadText(thread) {
   if (normalized.active_article_body) {
     lines.push("Active article body:");
     lines.push(normalized.active_article_body);
-  }
-
-  if (normalized.available_standard_responses.length) {
-    lines.push("Available standard responses:");
-    lines.push(normalized.available_standard_responses.join(" | "));
   }
 
   return normalizeText(lines.join("\n"));
