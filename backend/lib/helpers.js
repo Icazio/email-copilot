@@ -73,13 +73,17 @@ function normalizeStructuredThread(thread) {
     page_type: normalizeText(thread.page_type || ""),
     ticket_subject: normalizeText(thread.ticket_subject || ""),
     active_article_body: normalizeText(thread.active_article_body || ""),
+    customer_email: normalizeText(thread.customer_email || ""),
+    customer_id_email: normalizeText(thread.customer_id_email || ""),
+    customer_email_candidates: cleanArray(thread.customer_email_candidates).map((e) => normalizeText(e)),
     articles: cleanArray(thread.articles).map((article) => ({
       number: normalizeText(article?.number || ""),
       direction: normalizeText(article?.direction || ""),
       sender: normalizeText(article?.sender || ""),
       subject: normalizeText(article?.subject || ""),
       created: normalizeText(article?.created || ""),
-      status: normalizeText(article?.status || "")
+      status: normalizeText(article?.status || ""),
+      attachments: cleanArray(article?.attachments)
     }))
   };
 }

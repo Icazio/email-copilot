@@ -5,3 +5,5 @@ backend/.cache/
 .claude/
 credit-sample-page*.html
 credit-sample-page*_files/
+samples/*.html
+samples/*_files/

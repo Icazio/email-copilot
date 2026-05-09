@@ -146,8 +146,10 @@ function extractEmailsFromText(text) {
     const mailtoEmails = Array.from(document.querySelectorAll("a[href^='mailto:']"))
       .map((node) => cleanText((node.getAttribute("href") || "").replace(/^mailto:/i, "")))
       .filter(Boolean);
+    const senderSortDataEmails = Array.from(document.querySelectorAll(".Sender .SortData"))
+      .flatMap((input) => extractEmailsFromText(input.value || ""));
 
-    return filterCustomerEmails([...labeledEmails, ...pageTextEmails, ...mailtoEmails])
+    return filterCustomerEmails([...labeledEmails, ...pageTextEmails, ...mailtoEmails, ...senderSortDataEmails])
       .filter((item, index, items) => items.indexOf(item) === index)
       .slice(0, 20);
   }
