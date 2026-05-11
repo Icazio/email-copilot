@@ -36,7 +36,11 @@ function inferCategory(text) {
     return "invoice";
   }
 
-  if (/(free.?credits?|credit.*follow|follow.*credit|subscribe.*credit|credit.*subscri)/.test(lower)) {
+  const hasCreditKeyword = /\b(free.?credits?|credits?|cr[eé]ditos?|积分)\b/i.test(lower);
+  const hasAtHandle = /(?<!\S)@[\w.]{3,}/i.test(text);
+  const hasSocialUrl = /https?:\/\/(?:www\.)?(?:facebook|twitter|x\.com|youtube)\.com\/\S+/i.test(text);
+
+  if (hasAtHandle || (hasCreditKeyword && hasSocialUrl)) {
     return "free_credit";
   }
 
@@ -116,11 +120,22 @@ function extractFreeCredit(body) {
     .map((m) => m[0].replace(/[,.)>\s]+$/, ""))
     .filter((v, i, a) => a.indexOf(v) === i);
 
-  const youtubeIds = [...(text.matchAll(/@[\w.]{2,}/g) || [])]
+  const youtubeIds = [...(text.matchAll(/(?<!\S)@[\w.]{2,}/g) || [])]
     .map((m) => m[0])
     .filter((v, i, a) => a.indexOf(v) === i);
 
-  const { youtubeScreenshot, twitterScreenshot, ambiguousImages } = classifyArticleAttachments(articles);
+  const classified = classifyArticleAttachments(articles);
+  let youtubeScreenshot = classified.youtubeScreenshot;
+  const twitterScreenshot = classified.twitterScreenshot;
+  let ambiguousImages = classified.ambiguousImages;
+
+  // Ambiguous screenshot + YouTube handle → generate spreadsheet row but flag for manual verification
+  let screenshotNeedsVerification = false;
+  if (ambiguousImages && !youtubeScreenshot && youtubeIds.length > 0) {
+    youtubeScreenshot = true;
+    ambiguousImages = false;
+    screenshotNeedsVerification = true;
+  }
 
   const validChannels = [];
   const validLinks = [];
@@ -154,7 +169,8 @@ function extractFreeCredit(body) {
     youtubeIds,
     totalCredits: validChannels.length * 60,
     customerEmail,
-    ambiguousImages
+    ambiguousImages,
+    screenshotNeedsVerification
   };
 }
 
@@ -213,18 +229,21 @@ ${closing}`.trim();
 function buildFreeCreditNextStep(info) {
   const parts = [];
 
+  if (info.screenshotNeedsVerification) {
+    parts.push("检测到附件截图，请查看截图确认是否为关注截图。确认后可使用下方表格行记录。");
+  }
   if (info.ambiguousImages) {
-    parts.push("Manual check required: attached image content cannot be determined automatically. Ask the customer to clarify the channel.");
+    parts.push("检测到附件截图，但无法自动判断对应渠道，请查看截图内容确认。");
   }
   if (info.youtubeIdPending) {
-    parts.push("YouTube: awaiting screenshot from customer.");
+    parts.push("YouTube：等待客户发送订阅截图。");
   }
   if (info.validChannels.length > 0) {
-    parts.push(`Log to spreadsheet — copy the row below:\n${formatSpreadsheetRow(info)}`);
-    parts.push('Check spreadsheet the next day. Once credit is confirmed, reply using "AVCLabs: Add Free Credits (login with email)" template.');
+    parts.push("将下方表格行复制到积分记录表格。");
+    parts.push('次日确认表格中积分已发放后，使用「AVCLabs: Add Free Credits (login with email)」模板回复客户。');
   }
   if (!info.validChannels.length && !info.youtubeIdPending && !info.ambiguousImages) {
-    parts.push("No valid social media channels identified. Review the email manually.");
+    parts.push("未识别到有效社交媒体渠道，请人工核查邮件内容。");
   }
 
   return parts.join("\n\n");
@@ -276,26 +295,6 @@ function suggestTemplateFromStructuredData(category, body, templates) {
     return findTemplateById("cancel_renewal_v1", templates);
   }
 
-  if (responses.some((item) => item.includes("cancel subscription"))) {
-    return findTemplateById("cancel_renewal_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("ask for refunding") || item.includes("refund policy"))) {
-    return findTemplateById("refund_auto_renewal_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("register") || item.includes("new code"))) {
-    return findTemplateById("license_code_not_working_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("log files"))) {
-    return findTemplateById("technical_issue_collect_info_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("invoice"))) {
-    return findTemplateById("invoice_request_v1", templates);
-  }
-
   if (category === "account") {
     return findTemplateById("license_code_not_working_v1", templates);
   }
@@ -311,16 +310,16 @@ function buildSummary(text, category, structured) {
   const firstLine = normalizeText(structured?.active_article_body || text).split("\n")[0] || "";
 
   const map = {
-    free_credit: "Customer is requesting free credits for following social media channels.",
-    cancel_renewal: "Customer is requesting to cancel their subscription or auto-renewal.",
-    refund: "Customer is asking about a refund or charge dispute.",
-    invoice: "Customer is asking for invoice or billing documentation.",
-    account: "Customer is reporting an account, activation, or license code issue.",
-    technical: "Customer is reporting a technical issue and likely needs information collection before escalation.",
-    general: "Customer request needs manual review."
+    free_credit: "客户申请关注社交媒体渠道的免费积分。",
+    cancel_renewal: "客户请求取消订阅或自动续费。",
+    refund: "客户就退款或扣费问题进行咨询。",
+    invoice: "客户需要发票或账单文件。",
+    account: "客户反映账户、激活或许可证代码问题。",
+    technical: "客户报告技术问题，可能需要收集信息后再升级处理。",
+    general: "需人工核查客户请求内容。"
   };
 
-  return firstLine ? `${map[category]} First visible line: ${firstLine}` : map[category];
+  return firstLine ? `${map[category]} 邮件首行：${firstLine}` : map[category];
 }
 
 function buildQuestions(category, fields) {
@@ -328,25 +327,25 @@ function buildQuestions(category, fields) {
 
   if (category === "cancel_renewal") {
     if (!fields.account) {
-      questions.push("Could you confirm the email address used for the purchase?");
+      questions.push("请问您购买时使用的邮箱地址是什么？");
     }
     return questions;
   }
 
   if (!fields.order_id && (category === "refund" || category === "invoice")) {
-    questions.push("Could you please share your order number?");
+    questions.push("请问您的订单号是多少？");
   }
 
   if (!fields.account) {
-    questions.push("Could you confirm the email address used for the purchase?");
+    questions.push("请问您购买时使用的邮箱地址是什么？");
   }
 
   if (category === "account") {
-    questions.push("Could you share the license code and a screenshot of the error message?");
+    questions.push("请提供许可证代码以及报错截图，以便我们协助排查。");
   }
 
   if (category === "technical") {
-    questions.push("Could you share the product version, operating system, and steps to reproduce the issue?");
+    questions.push("请告知产品版本、操作系统，以及问题的复现步骤。");
   }
 
   return [...new Set(questions)].slice(0, 4);
@@ -356,29 +355,29 @@ function buildNextStep(category, body) {
   if (category === "cancel_renewal") {
     const status = parseSubscriptionStatus(body?.manual_lookup_result);
     if (status === "not_found") {
-      return "No order found. Ask the customer to confirm the email address used for purchase.";
+      return "未查到订单，请让客户确认购买时使用的邮箱地址。";
     }
     if (status === "all_cancelled") {
-      return "All subscriptions are already cancelled. Use the 'AVCLabs: cancel subscription' standard reply to confirm no further charges.";
+      return "所有订阅已取消。使用「AVCLabs: cancel subscription」标准回复，告知客户不会再产生扣费。";
     }
     if (status === "has_active") {
-      return "Active subscription found (PAID). Send acknowledgment email to customer. Then escalate: People → Owner → paste order info into text field → assign New Owner to Julie Cai → set subject to '取消续订'.";
+      return "发现有效订阅（PAID）。先发送确认邮件给客户，然后升级处理：People → Owner → 将订单信息粘贴到文本框 → 将 New Owner 指派给 Julie Cai → 将标题设为「取消续订」。";
     }
-    return "Run order search first to check subscription status before replying.";
+    return "请先执行订单查询，确认订阅状态后再回复客户。";
   }
   if (category === "refund") {
-    return "Review the order manually in the backend before sending any refund-related reply.";
+    return "发送任何退款相关回复前，请先在后台人工核查订单。";
   }
   if (category === "invoice") {
-    return "Collect the missing billing details and continue the manual invoice process.";
+    return "收集缺失的账单信息后，继续人工开票流程。";
   }
   if (category === "account") {
-    return "After collecting the required details, continue in the technical support platform.";
+    return "收集所需信息后，在技术支持平台继续处理。";
   }
   if (category === "technical") {
-    return "Collect missing technical details first, then record the case and escalate through the shared document and Redmine if needed.";
+    return "先收集缺失的技术信息，再在共享文档和 Redmine 中记录并升级处理。";
   }
-  return "Review the email manually and choose the closest support template.";
+  return "请人工核查邮件内容，选择最接近的支持模板。";
 }
 
 function buildCancelRenewalDraft(body, template) {
@@ -464,7 +463,7 @@ function analyzeThreadMock(body, templates) {
     const template = findTemplateById("free_credit_youtube_v1", templates);
     return {
       category,
-      summary: `Customer is requesting free credits for following social media channels.`,
+      summary: `客户申请关注社交媒体渠道的免费积分。`,
       confidence: 0.85,
       extracted_fields: {
         customer_email: info.customerEmail,
@@ -475,6 +474,7 @@ function analyzeThreadMock(body, templates) {
       },
       clarification_questions: [],
       next_step: buildFreeCreditNextStep(info),
+      spreadsheet_row: info.validChannels.length > 0 ? formatSpreadsheetRow(info) : "",
       suggested_template_id: info.youtubeIdPending ? (template?.id || null) : null
     };
   }
@@ -508,6 +508,7 @@ function generateDraftMock(body, templates) {
       draft_reply: buildFreeCreditDraft(info, template),
       clarification_questions: [],
       next_step: buildFreeCreditNextStep(info),
+      spreadsheet_row: info.validChannels.length > 0 ? formatSpreadsheetRow(info) : "",
       extracted_fields: {
         customer_email: info.customerEmail,
         valid_channels: info.validChannels,
@@ -547,6 +548,7 @@ function refineDraftMock(body, templates) {
       draft_reply: buildFreeCreditDraft(info, template),
       clarification_questions: [],
       next_step: buildFreeCreditNextStep(info),
+      spreadsheet_row: info.validChannels.length > 0 ? formatSpreadsheetRow(info) : "",
       extracted_fields: {
         customer_email: info.customerEmail,
         valid_channels: info.validChannels,

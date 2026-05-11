@@ -3,100 +3,151 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Email Copilot MVP</title>
+    <title>Email Copilot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
     <div class="app">
+
+      <!-- Header -->
       <header class="header">
-        <div>
-          <h1>Email Copilot</h1>
-          <p>Read-only draft assistant for support emails</p>
+        <div class="header-brand">
+          <div class="brand-dot"></div>
+          <span class="brand-name">Email Copilot</span>
         </div>
         <span id="status" class="badge">idle</span>
       </header>
 
-      <section class="card">
-        <label for="backendUrl">Backend URL</label>
-        <input id="backendUrl" type="text" value="http://localhost:8787" />
+      <!-- Tool links -->
+      <div class="tool-links">
+        <a href="http://sz.anvsoft-dev.com:81/login?back_url=http%3A%2F%2Fsz.anvsoft-dev.com%3A81%2Fprojects" target="_blank" class="tool-link">Redmine</a>
+        <a href="https://onedrive.live.com/view.aspx?cid=0&resid=9B933E8E402555BD!2536&origin=DigestEmail&extension=extension&e=vTZG6pjLO0uqFhVelm49Tw&at=20" target="_blank" class="tool-link">退款表格</a>
+        <a href="https://ipn.anvsoftware.com/query/index.php" target="_blank" class="tool-link">技术支持</a>
+        <a href="https://docs.qq.com/sheet/DWmVpcVpqWGRiTUVK?tab=BB08J2" target="_blank" class="tool-link">Credit 表格</a>
+      </div>
 
-        <details>
-          <summary>Centuran Selectors</summary>
+      <!-- Main actions -->
+      <div class="action-bar">
+        <button id="captureBtn" class="btn-primary">Capture</button>
+        <button id="analyzeBtn" class="btn-ghost">Analyze</button>
+        <button id="generateBtn" class="btn-ghost">Generate</button>
+        <button id="clearBtn" class="btn-ghost btn-clear">Clear</button>
+      </div>
 
-          <label for="subjectSelectors">Subject Selectors</label>
-          <textarea id="subjectSelectors" rows="5"></textarea>
-
-          <label for="threadSelectors">Thread Container Selectors</label>
-          <textarea id="threadSelectors" rows="7"></textarea>
-
-          <label for="messageSelectors">Message Item Selectors</label>
-          <textarea id="messageSelectors" rows="6"></textarea>
+      <!-- Thread -->
+      <div class="card">
+        <div class="field-group">
+          <label for="subject">Subject</label>
+          <input id="subject" type="text" />
+        </div>
+        <details class="subtle-details">
+          <summary>Email Thread</summary>
+          <textarea id="threadText" rows="9" style="margin-top:8px"></textarea>
         </details>
+      </div>
 
-        <div class="actions">
-          <button id="captureBtn">Capture Thread</button>
-          <button id="orderSearchBtn">Search Orders</button>
-          <button id="orderSearchDebugBtn">OrderSearch Debug</button>
-          <button id="analyzeBtn">Analyze</button>
-          <button id="generateBtn">Generate Draft</button>
-          <button id="clearBtn">Clear</button>
+      <!-- Order lookup -->
+      <div class="card">
+        <div class="field-group">
+          <label for="customerEmailInput">Customer Email</label>
+          <div class="search-row">
+            <input id="customerEmailInput" type="email" placeholder="自动识别，或手动填写后重新查询" />
+            <button id="orderSearchBtn" class="btn-secondary">Search</button>
+            <button id="orderSearchDebugBtn" class="btn-ghost-sm">Debug</button>
+          </div>
         </div>
-      </section>
-
-      <section class="card">
-        <label for="subject">Subject</label>
-        <input id="subject" type="text" />
-
-        <label for="threadText">Email Thread</label>
-        <textarea id="threadText" rows="10"></textarea>
-
-        <label for="manualLookup">Manual Lookup Result</label>
-        <textarea id="manualLookup" rows="5" placeholder="Paste customer or order lookup results here..."></textarea>
-
-        <label for="replyInstructions">Reply Instructions</label>
-        <textarea
-          id="replyInstructions"
-          rows="4"
-          placeholder="Enter agent notes or reply requirements, for example: explain politely, do not promise refund, ask for order ID first."
-        ></textarea>
-
-        <div class="actions">
-          <button id="refineBtn">Refine Draft</button>
-          <button id="copyBtn">Copy Draft</button>
+        <div class="field-group">
+          <div class="lookup-label-row">
+            <label for="manualLookup">Order Lookup Result</label>
+            <button class="lookup-toggle" id="lookupToggleBtn" style="display:none">原始数据</button>
+          </div>
+          <div id="orderResultsDisplay" style="display:none"></div>
+          <textarea id="manualLookup" rows="5" placeholder="订单查询结果将显示在这里，或手动粘贴..."></textarea>
         </div>
-      </section>
+      </div>
 
-      <section class="card">
-        <h2>Summary</h2>
-        <pre id="summary"></pre>
-      </section>
+      <!-- Reply instructions -->
+      <div class="card">
+        <div class="field-group">
+          <label for="replyInstructions">Reply Instructions</label>
+          <textarea id="replyInstructions" rows="3" placeholder="客服备注，例如：礼貌拒绝，先索要订单号..."></textarea>
+        </div>
+        <div class="draft-actions">
+          <button id="refineBtn" class="btn-ghost-sm">Refine Draft</button>
+          <button id="copyBtn" class="btn-coral-sm">Copy Draft</button>
+        </div>
+      </div>
 
-      <section class="card">
-        <h2>Extracted Fields</h2>
-        <pre id="fields"></pre>
-      </section>
+      <!-- Analysis results -->
+      <div class="card">
+        <div class="card-section">
+          <div class="section-label">Summary</div>
+          <pre id="summary"></pre>
+        </div>
+        <div class="card-section">
+          <div class="section-label">Questions To Ask</div>
+          <pre id="questions"></pre>
+        </div>
+        <div class="card-section">
+          <div class="section-label">Next Step</div>
+          <pre id="nextStep"></pre>
+        </div>
+        <details class="subtle-details">
+          <summary>Extracted Fields</summary>
+          <pre id="fields"></pre>
+        </details>
+      </div>
 
-      <section class="card">
-        <h2>Questions To Ask</h2>
-        <pre id="questions"></pre>
-      </section>
+      <!-- Spreadsheet row -->
+      <div class="card spreadsheet-card" id="spreadsheetRowCard" style="display:none">
+        <div class="spreadsheet-header">
+          <div class="section-label">表格记录行</div>
+          <span class="hint">点击全选 → Ctrl+C</span>
+        </div>
+        <textarea id="spreadsheetRow" rows="2" readonly class="spreadsheet-input"></textarea>
+      </div>
 
-      <section class="card">
-        <h2>Next Step</h2>
-        <pre id="nextStep"></pre>
-      </section>
+      <!-- Draft reply -->
+      <div class="card">
+        <div class="draft-header">
+          <div class="section-label">Draft Reply</div>
+        </div>
+        <textarea id="draftReply" rows="12"></textarea>
+      </div>
 
-      <section class="card">
-        <h2>Draft Reply</h2>
-        <textarea id="draftReply" rows="14"></textarea>
-      </section>
+      <!-- Config (collapsed) -->
+      <details class="card">
+        <summary class="card-summary">⚙ Config</summary>
+        <div class="field-group">
+          <label for="backendUrl">Backend URL</label>
+          <input id="backendUrl" type="text" value="http://localhost:8787" />
+        </div>
+        <details class="subtle-details">
+          <summary>Centuran Selectors</summary>
+          <div class="field-group" style="margin-top:8px">
+            <label for="subjectSelectors">Subject Selectors</label>
+            <textarea id="subjectSelectors" rows="4"></textarea>
+          </div>
+          <div class="field-group">
+            <label for="threadSelectors">Thread Container Selectors</label>
+            <textarea id="threadSelectors" rows="5"></textarea>
+          </div>
+          <div class="field-group">
+            <label for="messageSelectors">Message Item Selectors</label>
+            <textarea id="messageSelectors" rows="4"></textarea>
+          </div>
+        </details>
+      </details>
 
-      <section class="card">
-        <h2>Capture Debug</h2>
+      <!-- Debug (collapsed) -->
+      <details class="card">
+        <summary class="card-summary">Debug Info</summary>
         <pre id="debugInfo"></pre>
-      </section>
-    </div>
+      </details>
 
+    </div>
     <script src="panel.js"></script>
   </body>
 </html>
