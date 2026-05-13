@@ -102,11 +102,7 @@
     };
   }
 
-  function stripTicketPrefix(subject) {
-    return cleanText(String(subject || "").replace(/^Ticket#\S+\s*(?:[—–-]\s*)?/i, ""));
-  }
-
-  function extractSortData(cell) {
+function extractSortData(cell) {
     return cleanText(cell?.querySelector(".SortData")?.value || "");
   }
 
@@ -157,7 +153,7 @@ function extractEmailsFromText(text) {
   function collectZnunySubject() {
     const selected = textFromSelectors(DEFAULT_SUBJECT_SELECTORS);
     return {
-      subject: stripTicketPrefix(selected.text.split("\n")[0].slice(0, 300)),
+      subject: cleanText(selected.text),
       matchedSelector: selected.matchedSelector,
       inspected: selected.inspected
     };

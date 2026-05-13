@@ -606,7 +606,13 @@ function getPrimaryDetailText(doc) {
     hops += 1;
   }
 
-  return bestText.slice(0, 12000);
+  const afterHeading = bestText
+    .replace(/^[\s\S]*?Details of Order\s*/i, "")
+    .trimStart()
+    .replace(/\n{2,}/g, "\n")
+    .replace(/(^\s*\d{4}-\d{2}-\d{2}\s.+$)/gm, "$1\n\n")
+    .trimEnd();
+  return afterHeading.slice(0, 12000);
 }
 
 function parseDefinitionPairs(doc) {
@@ -735,7 +741,7 @@ function renderOrderResults(rows, customerEmail) {
       ? `${customerName} · ${customerEmail} · ${rows.length} 条订单`
       : `${customerEmail} · ${rows.length} 条订单`;
 
-    const cardsHtml = rows.slice(0, 10).map((row) => {
+    const cards = rows.slice(0, 10).map((row) => {
       const status = row.Status || "";
       const statusClass = /PAID/i.test(status) ? "status-paid"
         : /CANCEL/i.test(status) ? "status-cancelled"
@@ -765,9 +771,16 @@ function renderOrderResults(rows, customerEmail) {
           ${meta ? `<div class="order-meta">${meta}</div>` : ""}
           ${licenseField}
         </div>`;
-    }).join("");
+    });
 
-    display.innerHTML = `<div class="order-customer-line">${headerText}</div>${cardsHtml}`;
+    const collapseBtn = cards.length > 1
+      ? `<button class="order-collapse-btn">收起</button>`
+      : "";
+    const extraHtml = cards.length > 1
+      ? `<div class="order-extra-cards">${cards.slice(1).join("")}</div>`
+      : "";
+
+    display.innerHTML = `<div class="order-customer-line"><span>${headerText}</span>${collapseBtn}</div>${cards[0]}${extraHtml}`;
   }
 
   display.style.display = "";
@@ -878,7 +891,7 @@ async function runOrderSearch(options = {}) {
     }
     const parseFinishedAt = performance.now();
 
-    elements.manualLookup.value = formatOrderLookupResult(customerEmail, orderRows);
+    elements.manualLookup.value = detailText || formatOrderLookupResult(customerEmail, orderRows);
     renderOrderResults(orderRows, customerEmail);
 
     if (includeDebug) {
@@ -979,10 +992,12 @@ async function postJson(path, payload) {
 function renderAnalysis(data) {
   lastCategory = data.category || null;
   lastSuggestedTemplateId = data.suggested_template_id || data.template_id || null;
-  elements.summary.textContent = data.summary || "";
+  elements.summary.value = data.summary || "";
   elements.fields.textContent = JSON.stringify(data.extracted_fields || {}, null, 2);
-  elements.questions.textContent = (data.clarification_questions || []).map((item) => `- ${item}`).join("\n");
-  elements.nextStep.textContent = data.next_step || "";
+  const rawQ = data.clarification_questions;
+  const qList = Array.isArray(rawQ) ? rawQ : rawQ ? [String(rawQ)] : [];
+  elements.questions.value = qList.map((item) => `- ${item}`).join("\n");
+  elements.nextStep.value = data.next_step || "";
 
   const row = data.spreadsheet_row || "";
   elements.spreadsheetRow.value = row;
@@ -1060,10 +1075,10 @@ function clearPanel() {
   if (elements.lookupToggleBtn) elements.lookupToggleBtn.style.display = "none";
   elements.manualLookup.value = "";
   elements.replyInstructions.value = "";
-  elements.summary.textContent = "";
+  elements.summary.value = "";
   elements.fields.textContent = "";
-  elements.questions.textContent = "";
-  elements.nextStep.textContent = "";
+  elements.questions.value = "";
+  elements.nextStep.value = "";
   elements.draftReply.value = "";
   elements.spreadsheetRow.value = "";
   elements.spreadsheetRowCard.style.display = "none";
@@ -1074,7 +1089,7 @@ function clearPanel() {
 function handleError(error) {
   console.error(error);
   setStatus("error");
-  elements.nextStep.textContent = error.message || String(error);
+  elements.nextStep.value = error.message || String(error);
 }
 
 loadSettings().catch(handleError);
@@ -1088,14 +1103,25 @@ elements.lookupToggleBtn.addEventListener("click", () => {
 });
 
 elements.orderResultsDisplay.addEventListener("click", (e) => {
-  const btn = e.target.closest(".copy-chip");
-  if (!btn) return;
-  navigator.clipboard.writeText(btn.dataset.copy || "").then(() => {
-    btn.classList.add("copied");
-    const orig = btn.textContent;
-    btn.textContent = "✓";
-    setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1500);
-  });
+  const copyBtn = e.target.closest(".copy-chip");
+  if (copyBtn) {
+    navigator.clipboard.writeText(copyBtn.dataset.copy || "").then(() => {
+      copyBtn.classList.add("copied");
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = "✓";
+      setTimeout(() => { copyBtn.textContent = orig; copyBtn.classList.remove("copied"); }, 1500);
+    });
+    return;
+  }
+
+  const collapseBtn = e.target.closest(".order-collapse-btn");
+  if (collapseBtn) {
+    const extra = elements.orderResultsDisplay.querySelector(".order-extra-cards");
+    if (!extra) return;
+    const collapsed = extra.classList.toggle("collapsed");
+    const total = extra.querySelectorAll(".order-card").length + 1;
+    collapseBtn.textContent = collapsed ? `展开全部 (${total}条)` : "收起";
+  }
 });
 elements.captureBtn.addEventListener("click", () => {
   captureThread()

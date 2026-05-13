@@ -389,7 +389,41 @@ pre:empty::before {
   gap: 7px;
 }
 
+.order-extra-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.order-extra-cards.collapsed {
+  display: none;
+}
+
+.order-collapse-btn {
+  font-family: 'Space Grotesk', sans-serif;
+  font-size: 10px;
+  font-weight: 600;
+  padding: 2px 9px;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  border: 1.5px solid var(--border);
+  letter-spacing: 0.2px;
+  cursor: pointer;
+  margin-left: auto;
+  flex-shrink: 0;
+  transition: border-color 0.15s, color 0.15s;
+}
+
+.order-collapse-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
 .order-customer-line {
+  display: flex;
+  align-items: center;
+  width: 100%;
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
@@ -425,7 +459,8 @@ pre:empty::before {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
 }
 
 .order-product {
@@ -434,6 +469,8 @@ pre:empty::before {
   color: var(--text);
   line-height: 1.35;
   flex: 1;
+  min-width: 100px;
+  overflow-wrap: break-word;
 }
 
 .status-badge {
