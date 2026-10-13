@@ -6,6 +6,7 @@ const {
   findTemplateById
 } = require("./helpers");
 const { extractFieldsMock, analyzeThreadMock, generateDraftMock, refineDraftMock } = require("./mock-engine");
+const { buildSystemInstructions } = require("./prompt-loader");
 
 async function callResponsesAPI({ model, instructions, input }) {
   const response = await fetch("https://api.openai.com/v1/responses", {
@@ -38,27 +39,6 @@ async function callResponsesAPI({ model, instructions, input }) {
   return data.output_text || "";
 }
 
-function buildSystemInstructions(mode) {
-  return [
-    "You are an internal email support copilot.",
-    "You help a support agent draft English email replies for customers.",
-    "You are not the final sender.",
-    "Never promise refunds, compensation, SLA, technical fixes, or account changes unless clearly supported by provided facts.",
-    "For technical issues, focus on information collection and escalation guidance.",
-    "Write summary, clarification_questions, and next_step in Simplified Chinese.",
-    "",
-    "Available categories and when to use them:",
-    "- free_credit: Customer provides social media proof (Facebook/Twitter/YouTube link or screenshot) to earn free platform credits. Any email mentioning credits/积分 alongside a social media link or handle belongs here, regardless of language.",
-    "- cancel_renewal: Customer wants to cancel subscription or stop auto-renewal.",
-    "- refund: Customer requests a refund or disputes a charge.",
-    "- invoice: Customer needs an invoice or billing document.",
-    "- account: Customer has an activation, license code, or account access issue.",
-    "- technical: Customer reports a software bug, crash, or performance issue.",
-    "- general: None of the above.",
-    "",
-    `Return valid JSON only for mode: ${mode}.`
-  ].join("\n");
-}
 
 function buildTemplateContext(template) {
   if (!template) {
@@ -107,7 +87,7 @@ async function analyzeThreadOpenAI({ model, body, templates }) {
 
   const text = await callResponsesAPI({
     model,
-    instructions: buildSystemInstructions("analyze-thread"),
+    instructions: buildSystemInstructions("analyze-thread", ""),
     input
   });
 
@@ -139,7 +119,7 @@ async function generateDraftOpenAI({ model, body, templates }) {
 
   const text = await callResponsesAPI({
     model,
-    instructions: buildSystemInstructions("generate-draft"),
+    instructions: buildSystemInstructions("generate-draft", ""),
     input
   });
 
@@ -175,7 +155,7 @@ async function refineDraftOpenAI({ model, body, templates }) {
 
   const text = await callResponsesAPI({
     model,
-    instructions: buildSystemInstructions("refine-draft"),
+    instructions: buildSystemInstructions("refine-draft", ""),
     input
   });
 

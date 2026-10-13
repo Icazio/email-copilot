@@ -1,0 +1,58 @@
+{
+  "entries": [
+    {
+      "id": "product-001",
+      "title": "Refund Eligibility and Conditions",
+      "tags": ["refund", "money back", "return", "payment", "charged", "billing", "reimbursement", "退款", "返金", "remboursement", "Rückerstattung", "reembolso"],
+      "content": "Refund windows: 5 days for monthly and yearly subscriptions; 30 days for lifetime/perpetual plans. Eligible cases: duplicate payment, wrong product purchased and reported promptly, registration code not received within 24 hours with no support response, technical issues unresolved after 30 days, auto-renewal charged despite prior cancellation (proof required). Not eligible: request beyond the refund window, no reason provided, customer did not cooperate with troubleshooting, regional or platform price differences, wrong product not reported promptly, dissatisfied with results but no before/after comparison image provided."
+    },
+    {
+      "id": "product-002",
+      "title": "License Activation Failure",
+      "tags": ["license", "activation", "code", "activate", "invalid", "not working", "register", "registration", "激活", "注册码", "ライセンス", "licence", "Lizenz", "licencia"],
+      "content": "License codes are delivered by email after purchase. Common failure causes: typo in the code or email address, wrong product version downloaded, code already used on multiple devices, OS reinstall. Standard troubleshooting: (1) verify customer's purchase email matches system record, (2) check if the code has already been used multiple times, (3) test the code locally to confirm it is valid, (4) confirm customer downloaded the correct product version. Subscription expiry invalidates the code — customer must renew to continue use."
+    },
+    {
+      "id": "product-003",
+      "title": "License Device Reset and Transfer",
+      "tags": ["new computer", "device", "reset", "reinstall", "transfer", "migrate", "machine", "换电脑", "重装系统"],
+      "content": "Each license supports up to 3 devices, but customers are informed it is limited to 1 device. If a customer changes computers or reinstalls their OS, support can manually reset the activation to allow use on a new device. Customer must provide: the purchase email address and operating system details. After the reset, the old device's activation becomes invalid. This is handled manually by the support team upon request."
+    },
+    {
+      "id": "product-004",
+      "title": "Auto-Renewal Subscription",
+      "tags": ["auto-renewal", "renewal", "subscription", "cancel", "recurring", "charge", "automatic", "续订", "自动扣款", "キャンセル", "annuler", "annulation", "kündigen", "Kündigung", "cancelar", "cancelación"],
+      "content": "Subscriptions renew automatically by default. Customers can cancel auto-renewal themselves via the link in their subscription email, or by contacting support. If a customer was charged within the 5-day refund window and wishes to cancel, the standard refund policy applies. Cancellation and renewal-related refunds are handled by submitting the request through the ticket system to the responsible team."
+    },
+    {
+      "id": "product-005",
+      "title": "Invoice and Receipt",
+      "tags": ["invoice", "receipt", "VAT", "tax", "billing", "company", "official", "发票", "收据", "抬头"],
+      "content": "Invoices and receipts are generated manually by the support agent. For VAT invoices or invoices with company details, the customer must provide: company name, company address, and tax/VAT ID. Support handles this directly and can usually complete it immediately upon receiving the required information."
+    },
+    {
+      "id": "product-006",
+      "title": "Free Credit via Social Media",
+      "tags": ["free credit", "credits", "social media", "youtube", "facebook", "twitter", "review", "proof", "积分", "免费"],
+      "content": "Customers can earn platform credits by posting about AVCLabs products on social media. Eligible platforms: YouTube (video review), Facebook (post or review), Twitter/X (post with screenshot). Required proof: a direct link to the post or a screenshot clearly showing the customer's handle and the content. Credits are added manually by the support team. Each customer is eligible once per platform."
+    },
+    {
+      "id": "product-007",
+      "title": "Technical Issue — Crash or Feature Not Working",
+      "tags": ["crash", "not working", "bug", "error", "freeze", "slow", "quality", "broken", "崩溃", "闪退", "报错", "クラッシュ", "エラー", "plantage", "erreur", "Absturz", "Fehler", "fallo"],
+      "content": "For crashes, software errors, or unexpected behavior, first try common fixes: (1) confirm OS version and GPU model, (2) guide customer to update GPU drivers, (3) check if software is up to date, (4) guide customer to reinstall the software. If unresolved, use the 'crash' template to request log files from the customer. Submit collected logs and the steps already attempted to the technical team via the ticket system. If the issue remains unresolved after 30 days, the customer is eligible for a refund."
+    },
+    {
+      "id": "product-008",
+      "title": "Lost Purchase Email / Order Lookup",
+      "tags": ["lost email", "forgot email", "find order", "order lookup", "purchase email", "找不到邮箱", "找订单"],
+      "content": "If a customer cannot find their purchase email, support can locate the order using the internal support platform. Customer must provide: approximate purchase date, payment method, last 4 digits of the credit card, product name, and purchase amount. Once located, support can assist with account access or resending the license code."
+    },
+    {
+      "id": "product-009",
+      "title": "Email Address Change",
+      "tags": ["change email", "update email", "new email", "old email", "email address", "修改邮箱", "换邮箱"],
+      "content": "Customers who want to change their registered email address should contact support. The agent handles this via the internal support platform. The customer must provide their current registered email address to verify identity before the change can be made."
+    }
+  ]
+}

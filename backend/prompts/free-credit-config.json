@@ -1,0 +1,47 @@
+{
+  "social_platforms": {
+    "facebook": {
+      "id": "facebook",
+      "name": "Facebook",
+      "url_pattern": "https?://(?:www\\.)?facebook\\.com/\\S+",
+      "credits": 60,
+      "priority": 1
+    },
+    "twitter": {
+      "id": "twitter",
+      "name": "Twitter",
+      "url_pattern": "https?://(?:www\\.)?(?:twitter\\.com|x\\.com)/\\S+",
+      "credits": 60,
+      "priority": 2
+    },
+    "youtube": {
+      "id": "youtube",
+      "name": "Youtube",
+      "url_pattern": "https?://(?:www\\.)?youtube\\.com/\\S+",
+      "credits": 60,
+      "priority": 3,
+      "requires_screenshot": true
+    }
+  },
+  "attachment_detection": {
+    "youtube_keywords": ["/youtube/i", "/_youtube_/i", "/yt_/i"],
+    "twitter_keywords": ["/twitter/i", "/avclabsofficial/i", "/_x\\./i", "/x\\.com/i"],
+    "image_extensions": [".png", ".jpg", ".jpeg", ".gif", ".webp", ".bmp"]
+  },
+  "verification_rules": {
+    "youtube_handle_pattern": "/(?<!\\S)@[\\w.]{2,}/g",
+    "youtube_handle_min_length": 2,
+    "youtube_screenshot_required": true,
+    "ask_for_screenshot_message": "Unable to verify YouTube subscriptions from our end"
+  },
+  "credits_calculation": {
+    "base_credits_per_platform": 60,
+    "max_platforms": 3,
+    "max_total_credits": 180
+  },
+  "spreadsheet_format": {
+    "date_format": "YYYY.MM.DD",
+    "fields": ["date", "customer_email", "valid_channels", "total_credits", "reserved", "valid_links"],
+    "separator": "\t"
+  }
+}

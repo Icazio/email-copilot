@@ -5,6 +5,16 @@ const {
   pickTemplate,
   findTemplateById
 } = require("./helpers");
+const {
+  loadClassificationRules,
+  loadFreeCreditConfig,
+  getSummary,
+  getQuestions,
+  getGuidance,
+  getFreeCreditGuidance,
+  buildFreeCreditNextStepFromConfig,
+  getDraftTemplate
+} = require("./mock-engine-loader");
 
 function extractFieldsMock(input) {
   const body = typeof input === "string" ? { thread_text: input } : input || {};
@@ -31,36 +41,34 @@ function extractFieldsMock(input) {
 
 function inferCategory(text) {
   const lower = text.toLowerCase();
+  const rules = loadClassificationRules();
 
-  if (/(invoice|billing info|tax invoice|receipt)/.test(lower)) {
+  if (new RegExp(rules.invoice.pattern).test(lower)) {
     return "invoice";
   }
 
-  const hasCreditKeyword = /\b(free.?credits?|credits?|cr[eé]ditos?|积分)\b/i.test(lower);
-  const hasAtHandle = /(?<!\S)@[\w.]{3,}/i.test(text);
-  const hasSocialUrl = /https?:\/\/(?:www\.)?(?:facebook|twitter|x\.com|youtube)\.com\/\S+/i.test(text);
+  const creditRule = rules.free_credit;
+  const hasCreditKeyword = new RegExp(creditRule.patterns.hasCreditsKeyword).test(lower);
+  const hasAtHandle = new RegExp(creditRule.patterns.hasAtHandle).test(text);
+  const hasSocialUrl = new RegExp(creditRule.patterns.hasSocialUrl).test(text);
 
   if (hasAtHandle || (hasCreditKeyword && hasSocialUrl)) {
     return "free_credit";
   }
 
-  if (/(cancel.{0,20}(renew|subscri)|cancell?ation.{0,20}(subscri|plan)|do not renew|don.t renew|stop.{0,15}renew|stop.{0,10}bill|unsubscribe)/.test(lower)) {
+  if (new RegExp(rules.cancel_renewal.pattern).test(lower)) {
     return "cancel_renewal";
   }
 
-  if (/(refund|money back|auto-renew|renewed automatically)/.test(lower)) {
+  if (new RegExp(rules.refund.pattern).test(lower)) {
     return "refund";
   }
 
-  if (
-    /(license code|registration code|activation code|serial|code does not work|can't activate|cannot activate|new code)/.test(
-      lower
-    )
-  ) {
+  if (new RegExp(rules.account.pattern).test(lower)) {
     return "account";
   }
 
-  if (/(bug|crash|not working|error|failed|program issue|slow|freeze|stuck)/.test(lower)) {
+  if (new RegExp(rules.technical.pattern).test(lower)) {
     return "technical";
   }
 
@@ -183,8 +191,8 @@ function formatSpreadsheetRow(info) {
 function buildFreeCreditDraft(info, template) {
   const opening = template?.opening || "Hi,";
   const closing = template?.closing || "Best regards,";
-  const youtubeAsk =
-    "As we're currently unable to verify YouTube subscriptions from our end, could you please send us a screenshot showing that you've subscribed to our YouTube channel? This will help us complete the verification process.";
+  const draftTemplates = getDraftTemplate("free_credit");
+  const youtubeAsk = draftTemplates.youtube_ask;
 
   // All channels confirmed — no draft needed
   if (!info.youtubeIdPending && !info.ambiguousImages) {
@@ -193,60 +201,30 @@ function buildFreeCreditDraft(info, template) {
 
   // Ambiguous image — can't determine channel
   if (info.ambiguousImages) {
-    return `${opening}
-
-Thank you for reaching out.
-
-We received your message but were unable to determine which channel the attached image is for. Could you please confirm which platform the screenshot is from?
-
-${closing}`.trim();
+    return draftTemplates.ambiguous_image.replace("{closing}", closing).trim();
   }
 
   // Has valid channels + YouTube ID pending
   if (info.validChannels.length > 0 && info.youtubeIdPending) {
     const channelNote = `We have received your ${info.validChannels.join(" and ")} follow information and will process it shortly.`;
-    return `${opening}
-
-Thank you for your support!
-
-${channelNote}
-
-Regarding your YouTube subscription — ${youtubeAsk}
-
-${closing}`.trim();
+    return draftTemplates.valid_channels_with_youtube_pending
+      .replace("{channels}", info.validChannels.join(" and "))
+      .replace("{youtube_ask}", youtubeAsk)
+      .replace("{closing}", closing)
+      .replace(`${opening}\n\n`, "")
+      .trim();
   }
 
   // Only YouTube ID, nothing else confirmed yet
-  return `${opening}
-
-Thank you for your support!
-
-${youtubeAsk}
-
-${closing}`.trim();
+  return draftTemplates.only_youtube_id
+    .replace("{youtube_ask}", youtubeAsk)
+    .replace("{closing}", closing)
+    .replace(`${opening}\n\n`, "")
+    .trim();
 }
 
 function buildFreeCreditNextStep(info) {
-  const parts = [];
-
-  if (info.screenshotNeedsVerification) {
-    parts.push("检测到附件截图，请查看截图确认是否为关注截图。确认后可使用下方表格行记录。");
-  }
-  if (info.ambiguousImages) {
-    parts.push("检测到附件截图，但无法自动判断对应渠道，请查看截图内容确认。");
-  }
-  if (info.youtubeIdPending) {
-    parts.push("YouTube：等待客户发送订阅截图。");
-  }
-  if (info.validChannels.length > 0) {
-    parts.push("将下方表格行复制到积分记录表格。");
-    parts.push('次日确认表格中积分已发放后，使用「AVCLabs: Add Free Credits (login with email)」模板回复客户。');
-  }
-  if (!info.validChannels.length && !info.youtubeIdPending && !info.ambiguousImages) {
-    parts.push("未识别到有效社交媒体渠道，请人工核查邮件内容。");
-  }
-
-  return parts.join("\n\n");
+  return buildFreeCreditNextStepFromConfig(info);
 }
 
 // === END FREE CREDIT HELPERS ===
@@ -308,111 +286,31 @@ function suggestTemplateFromStructuredData(category, body, templates) {
 
 function buildSummary(text, category, structured) {
   const firstLine = normalizeText(structured?.active_article_body || text).split("\n")[0] || "";
-
-  const map = {
-    free_credit: "客户申请关注社交媒体渠道的免费积分。",
-    cancel_renewal: "客户请求取消订阅或自动续费。",
-    refund: "客户就退款或扣费问题进行咨询。",
-    invoice: "客户需要发票或账单文件。",
-    account: "客户反映账户、激活或许可证代码问题。",
-    technical: "客户报告技术问题，可能需要收集信息后再升级处理。",
-    general: "需人工核查客户请求内容。"
-  };
-
-  return firstLine ? `${map[category]} 邮件首行：${firstLine}` : map[category];
+  return getSummary(category, firstLine);
 }
 
 function buildQuestions(category, fields) {
-  const questions = [];
-
-  if (category === "cancel_renewal") {
-    if (!fields.account) {
-      questions.push("请问您购买时使用的邮箱地址是什么？");
-    }
-    return questions;
-  }
-
-  if (!fields.order_id && (category === "refund" || category === "invoice")) {
-    questions.push("请问您的订单号是多少？");
-  }
-
-  if (!fields.account) {
-    questions.push("请问您购买时使用的邮箱地址是什么？");
-  }
-
-  if (category === "account") {
-    questions.push("请提供许可证代码以及报错截图，以便我们协助排查。");
-  }
-
-  if (category === "technical") {
-    questions.push("请告知产品版本、操作系统，以及问题的复现步骤。");
-  }
-
-  return [...new Set(questions)].slice(0, 4);
+  return getQuestions(category, fields);
 }
 
 function buildNextStep(category, body) {
   if (category === "cancel_renewal") {
     const status = parseSubscriptionStatus(body?.manual_lookup_result);
-    if (status === "not_found") {
-      return "未查到订单，请让客户确认购买时使用的邮箱地址。";
-    }
-    if (status === "all_cancelled") {
-      return "所有订阅已取消。使用「AVCLabs: cancel subscription」标准回复，告知客户不会再产生扣费。";
-    }
-    if (status === "has_active") {
-      return "发现有效订阅（PAID）。先发送确认邮件给客户，然后升级处理：People → Owner → 将订单信息粘贴到文本框 → 将 New Owner 指派给 Julie Cai → 将标题设为「取消续订」。";
-    }
-    return "请先执行订单查询，确认订阅状态后再回复客户。";
+    return getGuidance(category, status);
   }
-  if (category === "refund") {
-    return "发送任何退款相关回复前，请先在后台人工核查订单。";
-  }
-  if (category === "invoice") {
-    return "收集缺失的账单信息后，继续人工开票流程。";
-  }
-  if (category === "account") {
-    return "收集所需信息后，在技术支持平台继续处理。";
-  }
-  if (category === "technical") {
-    return "先收集缺失的技术信息，再在共享文档和 Redmine 中记录并升级处理。";
-  }
-  return "请人工核查邮件内容，选择最接近的支持模板。";
+  return getGuidance(category);
 }
 
 function buildCancelRenewalDraft(body, template) {
   const opening = template?.opening || "Hi,";
   const closing = template?.closing || "Best regards,";
   const status = parseSubscriptionStatus(body?.manual_lookup_result);
+  const draftTemplates = getDraftTemplate("cancel_renewal");
 
-  if (status === "all_cancelled") {
-    return `${opening}
+  const templateKey = status === "all_cancelled" ? "all_cancelled" :
+                      status === "has_active" ? "has_active" : "not_found";
 
-Thank you for contacting us.
-
-We have checked your account and can confirm that your subscription has already been cancelled. No further charges will be made to your account.
-
-${closing}`.trim();
-  }
-
-  if (status === "has_active") {
-    return `${opening}
-
-Thank you for contacting us.
-
-We have received your request and will assist you in submitting your request to cancel your auto-renewal. You will be notified by email upon success.
-
-${closing}`.trim();
-  }
-
-  // not_found or no order search run yet
-  return `${opening}
-
-Thank you for contacting us.
-
-To help us locate your subscription, could you please confirm the email address used for the purchase?
-
-${closing}`.trim();
+  return `${opening}\n\n${draftTemplates[templateKey]}\n\n${closing}`.trim();
 }
 
 function buildDraft({ category, fields, template, body }) {
@@ -420,13 +318,9 @@ function buildDraft({ category, fields, template, body }) {
     return buildCancelRenewalDraft(body, template);
   }
 
-  const customerNeed = {
-    refund: "your refund-related request",
-    invoice: "your invoice request",
-    account: "the activation issue",
-    technical: "the issue you reported",
-    general: "your request"
-  }[category];
+  const draftTemplate = getDraftTemplate("generic_support");
+  const categoryTemplate = getDraftTemplate(category);
+  const customerNeed = categoryTemplate?.customer_need || "your request";
 
   const opening = template?.opening || "Hi,";
   const closing = template?.closing || "Best regards,";
@@ -440,17 +334,14 @@ function buildDraft({ category, fields, template, body }) {
     ? `To help us proceed, could you please provide the following information?\n\n- ${questions.join("\n- ")}`
     : "We will review the details and assist you further.";
 
-  return `${opening}
-
-Thank you for contacting us.
-
-We understand that you are contacting us about ${customerNeed}. ${contextSentence}${orderSentence}${
-    template?.body_guidance?.[0] || "We would like to help you with this as quickly as possible."
-  }
-
-${questionBlock}
-
-${closing}`.trim();
+  return draftTemplate
+    .replace("{opening}", opening)
+    .replace("{customer_need}", customerNeed)
+    .replace("{context_sentence}", contextSentence)
+    .replace("{order_sentence}", orderSentence)
+    .replace("{body_guidance}", template?.body_guidance?.[0] || "We would like to help you with this as quickly as possible.")
+    .replace("{question_block}", questionBlock)
+    .replace("{closing}", closing);
 }
 
 function analyzeThreadMock(body, templates) {

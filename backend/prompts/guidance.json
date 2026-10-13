@@ -1,0 +1,20 @@
+{
+  "cancel_renewal": {
+    "not_found": "未查到订单，请让客户确认购买时使用的邮箱地址。",
+    "all_cancelled": "所有订阅已取消。使用「AVCLabs: cancel subscription」标准回复，告知客户不会再产生扣费。",
+    "has_active": "发现有效订阅（PAID）。先发送确认邮件给客户，然后升级处理：People → Owner → 将订单信息粘贴到文本框 → 将 New Owner 指派给 Julie Cai → 将标题设为「取消续订」。",
+    "no_lookup": "请先执行订单查询，确认订阅状态后再回复客户。"
+  },
+  "refund": "发送任何退款相关回复前，请先在后台人工核查订单。",
+  "invoice": "收集缺失的账单信息后，继续人工开票流程。",
+  "account": "收集所需信息后，在技术支持平台继续处理。",
+  "technical": "先收集缺失的技术信息，再在共享文档和 Redmine 中记录并升级处理。",
+  "general": "请人工核查邮件内容，选择最接近的支持模板。",
+  "free_credit": {
+    "screenshot_needs_verification": "检测到附件截图，请查看截图确认是否为关注截图。确认后可使用下方表格行记录。",
+    "ambiguous_images": "检测到附件截图，但无法自动判断对应渠道，请查看截图内容确认。",
+    "youtube_pending": "YouTube：等待客户发送订阅截图。",
+    "valid_channels": "将下方表格行复制到积分记录表格。\n\n次日确认表格中积分已发放后，使用「AVCLabs: Add Free Credits (login with email)」模板回复客户。",
+    "no_valid_channels": "未识别到有效社交媒体渠道，请人工核查邮件内容。"
+  }
+}

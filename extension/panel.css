@@ -579,3 +579,140 @@ pre:empty::before {
   border-color: #C8A030;
   box-shadow: 0 0 0 3px rgba(200, 160, 48, 0.12);
 }
+
+/* ── Issue tracker ───────────────────────── */
+.issue-tracker-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+#issueTrackerList {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.issue-card {
+  border: 1.5px solid var(--border);
+  border-radius: 10px;
+  padding: 9px 12px;
+  background: var(--surface);
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.issue-card-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 6px;
+}
+
+.issue-subject {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+  line-height: 1.35;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+}
+
+.issue-product {
+  font-size: 11px;
+  color: var(--muted);
+  margin-top: 2px;
+  line-height: 1.3;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+}
+
+.issue-id {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.issue-meta {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.issue-status {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--surface);
+  color: var(--muted);
+  border: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.issue-age {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 7px;
+  border-radius: 999px;
+}
+
+.issue-assignee {
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.issue-notes {
+  font-size: 12px;
+  color: var(--muted);
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border);
+  line-height: 1.4;
+  word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.age-fresh { background: #E6F9EE; color: #1A7A40; }
+.age-warn  { background: #FFFBEB; color: #92680A; }
+.age-old   { background: #FFF0F0; color: #C0392B; }
+
+.issue-tracker-empty {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 12px;
+  text-align: center;
+  background: var(--surface);
+  border-radius: 9px;
+  border: 1.5px dashed var(--border);
+}
+
+.issue-tracker-login-prompt {
+  font-size: 12px;
+  color: var(--muted);
+  padding: 10px 12px;
+  background: #FFFBEB;
+  border: 1.5px solid #FCD34D;
+  border-radius: 9px;
+  text-align: center;
+}
+
+.issue-tracker-login-prompt a {
+  color: var(--accent2);
+  font-weight: 600;
+  text-decoration: none;
+}
+
+.issue-tracker-login-prompt a:hover { text-decoration: underline; }
