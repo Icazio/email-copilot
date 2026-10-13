@@ -31,15 +31,16 @@
       <!-- Main actions -->
       <div class="action-bar">
         <button id="captureBtn" class="btn-primary">Capture</button>
-        <button id="analyzeBtn" class="btn-ghost">Analyze</button>
-        <button id="generateBtn" class="btn-ghost">Generate</button>
         <button id="clearBtn" class="btn-ghost btn-clear">Clear</button>
       </div>
 
       <!-- Thread -->
       <div class="card">
         <div class="field-group">
-          <label for="subject">Subject</label>
+          <div class="field-label-row">
+            <label for="subject">Subject</label>
+            <button id="copyTicketBtn" class="copy-chip">复制工单号</button>
+          </div>
           <input id="subject" type="text" />
         </div>
         <details class="subtle-details">
@@ -51,7 +52,10 @@
       <!-- Order lookup -->
       <div class="card">
         <div class="field-group">
-          <label for="customerEmailInput">Customer Email</label>
+          <div class="field-label-row">
+            <label for="customerEmailInput">Customer Email</label>
+            <button id="copyEmailBtn" class="copy-chip">复制邮箱</button>
+          </div>
           <div class="search-row">
             <input id="customerEmailInput" type="email" placeholder="自动识别，或手动填写后重新查询" />
             <button id="orderSearchBtn" class="btn-secondary">Search</button>
@@ -68,53 +72,29 @@
         </div>
       </div>
 
-      <!-- Reply instructions -->
-      <div class="card">
-        <div class="field-group">
-          <label for="replyInstructions">Reply Instructions</label>
-          <textarea id="replyInstructions" rows="3" placeholder="客服备注，例如：礼貌拒绝，先索要订单号..."></textarea>
+      <!-- Chatbox -->
+      <div class="chat-wrap">
+        <!-- messages area -->
+        <div class="chat-body">
+          <div class="chat-header">
+            <span class="chat-label">Chat</span>
+            <button id="chatClearBtn" class="chat-clear-btn">清空对话</button>
+          </div>
+          <div id="chatMessages" class="chat-messages"></div>
         </div>
-        <div class="draft-actions">
-          <button id="refineBtn" class="btn-ghost-sm">Refine Draft</button>
-          <button id="copyBtn" class="btn-coral-sm">Copy Draft</button>
+        <!-- footer: chips + input -->
+        <div class="chat-footer">
+          <div class="chat-quick-actions" id="chatQuickActions">
+            <button class="chat-chip" data-msg="帮我写一封英文回复邮件。">写回复</button>
+            <button class="chat-chip" data-msg="用2-3句话总结一下客户的问题。">总结问题</button>
+            <button class="chat-chip" data-msg="我还需要向客户询问哪些信息？">还需问什么</button>
+            <button class="chat-chip" data-msg="这个工单下一步应该怎么处理？">下一步</button>
+          </div>
+          <div class="chat-input-row">
+            <textarea id="chatInput" rows="2" placeholder="随时提问…"></textarea>
+            <button id="chatSendBtn" class="btn-primary chat-send-btn">发送</button>
+          </div>
         </div>
-      </div>
-
-      <!-- Analysis results -->
-      <div class="card">
-        <div class="card-section">
-          <div class="section-label">Summary</div>
-          <textarea id="summary" rows="3"></textarea>
-        </div>
-        <div class="card-section">
-          <div class="section-label">Questions To Ask</div>
-          <textarea id="questions" rows="4"></textarea>
-        </div>
-        <div class="card-section">
-          <div class="section-label">Next Step</div>
-          <textarea id="nextStep" rows="2"></textarea>
-        </div>
-        <details class="subtle-details">
-          <summary>Extracted Fields</summary>
-          <pre id="fields"></pre>
-        </details>
-      </div>
-
-      <!-- Spreadsheet row -->
-      <div class="card spreadsheet-card" id="spreadsheetRowCard" style="display:none">
-        <div class="spreadsheet-header">
-          <div class="section-label">表格记录行</div>
-          <span class="hint">点击全选 → Ctrl+C</span>
-        </div>
-        <textarea id="spreadsheetRow" rows="2" readonly class="spreadsheet-input"></textarea>
-      </div>
-
-      <!-- Draft reply -->
-      <div class="card">
-        <div class="draft-header">
-          <div class="section-label">Draft Reply</div>
-        </div>
-        <textarea id="draftReply" rows="12"></textarea>
       </div>
 
       <!-- Config (collapsed) -->

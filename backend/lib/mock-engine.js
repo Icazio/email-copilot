@@ -467,9 +467,49 @@ function refineDraftMock(body, templates) {
   };
 }
 
+function chatMock({ messages = [], thread_context = {}, order_context = "" } = {}) {
+  const lastMsg = String(messages[messages.length - 1]?.content || "").toLowerCase();
+  const subject = thread_context?.subject || "";
+  const hasThread = Boolean((thread_context?.thread_text || "").trim());
+
+  if (/draft|reply|write|compose|email/i.test(lastMsg)) {
+    const body = hasThread
+      ? "Thank you for contacting us. We have reviewed your request and will follow up with you shortly."
+      : "Thank you for reaching out to AVCLabs Support. Could you please provide more details about your issue so we can assist you?";
+    return {
+      reply: `Subject: Re: ${subject || "(no subject)"}\n\nDear Customer,\n\n${body}\n\nBest regards,\nAVCLabs Support Team`
+    };
+  }
+
+  if (/summar|what is the issue|what happened|describe/i.test(lastMsg)) {
+    return {
+      reply: hasThread
+        ? `Summary: The customer has submitted a support request. Subject: "${subject}". Please review the email thread for full context.`
+        : "No email thread has been captured yet. Click Capture to extract the thread from the current page."
+    };
+  }
+
+  if (/ask|question|need.*info|what.*info|missing/i.test(lastMsg)) {
+    return {
+      reply: "Consider asking the customer for:\n- Their purchase email address\n- Order ID or transaction ID\n- Product name and version\n- Operating system\n- Steps already attempted"
+    };
+  }
+
+  if (/next step|what should|recommend|eligible|refund|policy/i.test(lastMsg)) {
+    return {
+      reply: "Review the customer's issue against our standard policies. If order information is available, check the purchase date and status before proceeding. Use the Order Search to look up their order if you have their email."
+    };
+  }
+
+  return {
+    reply: `Running in mock mode — responses are template-based.\n\nFor full AI assistance, configure a real provider in .env:\n  AI_PROVIDER=deepseek\n  DEEPSEEK_API_KEY=...\n\nTry asking: "Write a reply", "Summarize the issue", or "What should I ask?"`
+  };
+}
+
 module.exports = {
   analyzeThreadMock,
   extractFieldsMock,
   generateDraftMock,
-  refineDraftMock
+  refineDraftMock,
+  chatMock
 };

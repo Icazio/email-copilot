@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Email Copilot MVP",
+  "name": "Email Copilot",
   "version": "0.1.0",
   "description": "Internal side-panel copilot for support email drafting.",
   "permissions": ["activeTab", "storage", "sidePanel", "scripting", "webNavigation"],

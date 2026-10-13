@@ -7,35 +7,29 @@ const elements = {
   customerEmailInput: document.getElementById("customerEmailInput"),
   orderSearchBtn: document.getElementById("orderSearchBtn"),
   orderSearchDebugBtn: document.getElementById("orderSearchDebugBtn"),
-  analyzeBtn: document.getElementById("analyzeBtn"),
-  generateBtn: document.getElementById("generateBtn"),
   clearBtn: document.getElementById("clearBtn"),
-  refineBtn: document.getElementById("refineBtn"),
-  copyBtn: document.getElementById("copyBtn"),
   subject: document.getElementById("subject"),
   threadText: document.getElementById("threadText"),
   manualLookup: document.getElementById("manualLookup"),
-  replyInstructions: document.getElementById("replyInstructions"),
-  summary: document.getElementById("summary"),
-  fields: document.getElementById("fields"),
-  questions: document.getElementById("questions"),
-  nextStep: document.getElementById("nextStep"),
-  draftReply: document.getElementById("draftReply"),
   orderResultsDisplay: document.getElementById("orderResultsDisplay"),
   lookupToggleBtn: document.getElementById("lookupToggleBtn"),
-  spreadsheetRowCard: document.getElementById("spreadsheetRowCard"),
-  spreadsheetRow: document.getElementById("spreadsheetRow"),
+  chatMessages: document.getElementById("chatMessages"),
+  chatInput: document.getElementById("chatInput"),
+  chatSendBtn: document.getElementById("chatSendBtn"),
+  chatQuickActions: document.getElementById("chatQuickActions"),
+  chatClearBtn: document.getElementById("chatClearBtn"),
+  copyTicketBtn: document.getElementById("copyTicketBtn"),
+  copyEmailBtn: document.getElementById("copyEmailBtn"),
   debugInfo: document.getElementById("debugInfo"),
   status: document.getElementById("status")
 };
 
-let lastCategory = null;
-let lastSuggestedTemplateId = null;
 let lastThreadStructured = null;
 let orderSearchContextPromise = null;
 let activeOperation = null;
 let autoOrderSearchEnabled = true;
-const BUTTON_DEFAULT_LABELS = new Map();
+const chatHistory = [];
+
 const DEFAULTS = {
   backendUrl: "http://localhost:8787",
   subjectSelectors: [
@@ -84,50 +78,9 @@ function setStatus(text) {
   elements.status.textContent = text;
 }
 
-function setButtonsDisabled(disabled) {
-  [
-    elements.captureBtn,
-    elements.orderSearchBtn,
-    elements.orderSearchDebugBtn,
-    elements.analyzeBtn,
-    elements.generateBtn,
-    elements.clearBtn,
-    elements.refineBtn,
-    elements.copyBtn
-  ].forEach((button) => {
-    if (button) {
-      button.disabled = disabled;
-    }
-  });
-}
-
-function ensureButtonLabelsCaptured() {
-  if (BUTTON_DEFAULT_LABELS.size) {
-    return;
-  }
-
-  [
-    elements.captureBtn,
-    elements.orderSearchBtn,
-    elements.orderSearchDebugBtn,
-    elements.analyzeBtn,
-    elements.generateBtn,
-    elements.clearBtn,
-    elements.refineBtn,
-    elements.copyBtn
-  ].forEach((button) => {
-    if (button) {
-      BUTTON_DEFAULT_LABELS.set(button, button.textContent);
-    }
-  });
-}
-
-function restoreButtonLabels() {
-  BUTTON_DEFAULT_LABELS.forEach((label, button) => {
-    if (button) {
-      button.textContent = label;
-    }
-  });
+function setCaptureBusy(disabled) {
+  [elements.captureBtn, elements.orderSearchBtn, elements.orderSearchDebugBtn, elements.clearBtn]
+    .forEach((btn) => { if (btn) btn.disabled = disabled; });
 }
 
 function shouldAutoSearchOrders() {
@@ -139,20 +92,18 @@ async function runWithBusyState(statusText, button, busyLabel, work) {
     throw new Error(`Another action is still running: ${activeOperation}.`);
   }
 
-  ensureButtonLabelsCaptured();
+  const origLabel = button?.textContent;
   activeOperation = statusText;
-  setButtonsDisabled(true);
-  if (button && busyLabel) {
-    button.textContent = busyLabel;
-  }
+  setCaptureBusy(true);
+  if (button && busyLabel) button.textContent = busyLabel;
   setStatus(statusText);
 
   try {
     return await work();
   } finally {
     activeOperation = null;
-    restoreButtonLabels();
-    setButtonsDisabled(false);
+    if (button && origLabel) button.textContent = origLabel;
+    setCaptureBusy(false);
   }
 }
 
@@ -275,7 +226,6 @@ async function captureThread() {
     if (detectedEmail) {
       elements.customerEmailInput.value = detectedEmail;
     }
-
   });
 }
 
@@ -291,7 +241,7 @@ async function autoSearchOrdersAfterCapture() {
   try {
     await runOrderSearch({ silent: true });
   } catch (_error) {
-    // Ignore auto-search failures; manual search/debug remains available.
+    // Ignore auto-search failures.
   }
 }
 
@@ -667,10 +617,6 @@ function escapeRegExp(text) {
   return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function safeMatchValue(match, index) {
-  return String(match?.[index] || "").trim();
-}
-
 function buildRawOrderEntry(row) {
   const leading = row.Customer ? `${row.Customer} <${row.Email}>` : `<${row.Email}>`;
   return `${leading} ${row.Country} [${row.Product}]\n${row["Purchase Date"]} - ${row.Provider} - ${row["Order ID"]} - ${row["License Key"]} - ${row.Amount} - ${row.Status}`.trim();
@@ -825,139 +771,139 @@ async function runOrderSearch(options = {}) {
     includeDebug ? elements.orderSearchDebugBtn : elements.orderSearchBtn,
     includeDebug ? "Debugging..." : "Searching...",
     async () => {
-    const tab = await getActiveTab();
-    if (!tab?.id || !tab.url) {
-      throw new Error("No active tab found.");
-    }
+      const tab = await getActiveTab();
+      if (!tab?.id || !tab.url) {
+        throw new Error("No active tab found.");
+      }
 
-    const origin = getBaseOrigin(tab.url);
-    if (!origin) {
-      throw new Error("Unable to determine current origin.");
-    }
+      const origin = getBaseOrigin(tab.url);
+      if (!origin) {
+        throw new Error("Unable to determine current origin.");
+      }
 
-    const customerEmail = elements.customerEmailInput.value.trim() || getCandidateCustomerEmail();
-    if (!customerEmail) {
-      throw new Error("No customer email found. Please enter the customer email manually.");
-    }
-    const totalStartedAt = performance.now();
+      const customerEmail = elements.customerEmailInput.value.trim() || getCandidateCustomerEmail();
+      if (!customerEmail) {
+        throw new Error("No customer email found. Please enter the customer email manually.");
+      }
+      const totalStartedAt = performance.now();
 
-    let context = await fetchOrderSearchContext(origin);
-    const parser = new DOMParser();
-    const payload = { ...context.payloadBase };
-    payload.Email = customerEmail;
-    const postStartedAt = performance.now();
-    let submitResponse = await fetch(context.submitUrl, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams(payload).toString()
-    });
-
-    let resultHtml = await submitResponse.text();
-    const postLoadedAt = performance.now();
-    let resultDoc = parser.parseFromString(resultHtml, "text/html");
-
-    if (/login\s*-\s*znuny/i.test(resultDoc.title || "")) {
-      context = await fetchOrderSearchContext(origin);
-      const retryPayload = { ...context.payloadBase, Email: customerEmail };
-      submitResponse = await fetch(context.submitUrl, {
+      let context = await fetchOrderSearchContext(origin);
+      const parser = new DOMParser();
+      const payload = { ...context.payloadBase };
+      payload.Email = customerEmail;
+      const postStartedAt = performance.now();
+      let submitResponse = await fetch(context.submitUrl, {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded"
         },
-        body: new URLSearchParams(retryPayload).toString()
+        body: new URLSearchParams(payload).toString()
       });
-      resultHtml = await submitResponse.text();
-      resultDoc = parser.parseFromString(resultHtml, "text/html");
-    }
 
-    const parseStartedAt = performance.now();
-    const detailText = getPrimaryDetailText(resultDoc);
-    const textBlockRows = parseOrderRowsFromDetailBlocks(
-      detailText ? [{ text_full: detailText }] : [],
-      customerEmail
-    );
-    let orderRows = textBlockRows;
+      let resultHtml = await submitResponse.text();
+      const postLoadedAt = performance.now();
+      let resultDoc = parser.parseFromString(resultHtml, "text/html");
 
-    if (!orderRows.length) {
-      const rawOrderRows = parseOrderRows(resultDoc);
-      const definitionPairs = parseDefinitionPairs(resultDoc);
-      orderRows = rawOrderRows.length
-        ? rawOrderRows
-        : normalizeOrderRows(rawOrderRows, definitionPairs);
-    }
-    const parseFinishedAt = performance.now();
-
-    elements.manualLookup.value = detailText || formatOrderLookupResult(customerEmail, orderRows);
-    renderOrderResults(orderRows, customerEmail);
-
-    if (includeDebug) {
-      const rawOrderRows = parseOrderRows(resultDoc);
-      const resultHeadings = getHeadings(resultDoc);
-      const resultForms = parseOrderSearchForms(resultDoc);
-      const resultTables = summarizeTables(resultDoc);
-      const detailBlocks = summarizeDetailsBlocks(resultDoc);
-      const definitionPairs = parseDefinitionPairs(resultDoc);
-
-      elements.debugInfo.textContent = JSON.stringify(
-        {
-          ordersearch_debug: true,
-          request_url: context.targetUrl,
-          submit_url: context.submitUrl,
-          timings: {
-            form_request_ms: context.timings?.request_ms || 0,
-            form_parse_ms: context.timings?.parse_ms || 0,
-            post_request_ms: Math.round(postLoadedAt - postStartedAt),
-            result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
-            total_ms: Math.round(performance.now() - totalStartedAt)
+      if (/login\s*-\s*znuny/i.test(resultDoc.title || "")) {
+        context = await fetchOrderSearchContext(origin);
+        const retryPayload = { ...context.payloadBase, Email: customerEmail };
+        submitResponse = await fetch(context.submitUrl, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
           },
-          response_status: context.responseStatus,
-          response_title: context.responseTitle,
-          search_status: submitResponse.status,
-          search_title: resultDoc.title || "",
-          candidate_customer_email: customerEmail,
-          headings: context.headings,
-          result_headings: resultHeadings,
-          form_count: context.formCount,
-          forms: context.forms,
-          submit_payload_keys: Object.keys(payload),
-          result_form_count: resultForms.length,
-          detail_text_length: detailText.length,
-          result_tables: resultTables,
-          detail_blocks: detailBlocks,
-          definition_pairs_preview: definitionPairs.slice(0, 15),
-          raw_result_count: rawOrderRows.length,
-          text_block_result_count: textBlockRows.length,
-          result_count: orderRows.length,
-          result_preview: orderRows.slice(0, 5)
-        },
-        null,
-        2
-      );
-    } else if (!silent) {
-      elements.debugInfo.textContent = JSON.stringify(
-        {
-          ordersearch: true,
-          timings: {
-            form_request_ms: context.timings?.request_ms || 0,
-            form_parse_ms: context.timings?.parse_ms || 0,
-            post_request_ms: Math.round(postLoadedAt - postStartedAt),
-            result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
-            total_ms: Math.round(performance.now() - totalStartedAt)
-          },
-          candidate_customer_email: customerEmail,
-          search_title: resultDoc.title || "",
-          result_count: orderRows.length
-        },
-        null,
-        2
-      );
-    }
+          body: new URLSearchParams(retryPayload).toString()
+        });
+        resultHtml = await submitResponse.text();
+        resultDoc = parser.parseFromString(resultHtml, "text/html");
+      }
 
-    setStatus(includeDebug ? "ordersearch-debug-ready" : "ordersearch-ready");
+      const parseStartedAt = performance.now();
+      const detailText = getPrimaryDetailText(resultDoc);
+      const textBlockRows = parseOrderRowsFromDetailBlocks(
+        detailText ? [{ text_full: detailText }] : [],
+        customerEmail
+      );
+      let orderRows = textBlockRows;
+
+      if (!orderRows.length) {
+        const rawOrderRows = parseOrderRows(resultDoc);
+        const definitionPairs = parseDefinitionPairs(resultDoc);
+        orderRows = rawOrderRows.length
+          ? rawOrderRows
+          : normalizeOrderRows(rawOrderRows, definitionPairs);
+      }
+      const parseFinishedAt = performance.now();
+
+      elements.manualLookup.value = detailText || formatOrderLookupResult(customerEmail, orderRows);
+      renderOrderResults(orderRows, customerEmail);
+
+      if (includeDebug) {
+        const rawOrderRows = parseOrderRows(resultDoc);
+        const resultHeadings = getHeadings(resultDoc);
+        const resultForms = parseOrderSearchForms(resultDoc);
+        const resultTables = summarizeTables(resultDoc);
+        const detailBlocks = summarizeDetailsBlocks(resultDoc);
+        const definitionPairs = parseDefinitionPairs(resultDoc);
+
+        elements.debugInfo.textContent = JSON.stringify(
+          {
+            ordersearch_debug: true,
+            request_url: context.targetUrl,
+            submit_url: context.submitUrl,
+            timings: {
+              form_request_ms: context.timings?.request_ms || 0,
+              form_parse_ms: context.timings?.parse_ms || 0,
+              post_request_ms: Math.round(postLoadedAt - postStartedAt),
+              result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
+              total_ms: Math.round(performance.now() - totalStartedAt)
+            },
+            response_status: context.responseStatus,
+            response_title: context.responseTitle,
+            search_status: submitResponse.status,
+            search_title: resultDoc.title || "",
+            candidate_customer_email: customerEmail,
+            headings: context.headings,
+            result_headings: resultHeadings,
+            form_count: context.formCount,
+            forms: context.forms,
+            submit_payload_keys: Object.keys(payload),
+            result_form_count: resultForms.length,
+            detail_text_length: detailText.length,
+            result_tables: resultTables,
+            detail_blocks: detailBlocks,
+            definition_pairs_preview: definitionPairs.slice(0, 15),
+            raw_result_count: rawOrderRows.length,
+            text_block_result_count: textBlockRows.length,
+            result_count: orderRows.length,
+            result_preview: orderRows.slice(0, 5)
+          },
+          null,
+          2
+        );
+      } else if (!silent) {
+        elements.debugInfo.textContent = JSON.stringify(
+          {
+            ordersearch: true,
+            timings: {
+              form_request_ms: context.timings?.request_ms || 0,
+              form_parse_ms: context.timings?.parse_ms || 0,
+              post_request_ms: Math.round(postLoadedAt - postStartedAt),
+              result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
+              total_ms: Math.round(performance.now() - totalStartedAt)
+            },
+            candidate_customer_email: customerEmail,
+            search_title: resultDoc.title || "",
+            result_count: orderRows.length
+          },
+          null,
+          2
+        );
+      }
+
+      setStatus(includeDebug ? "ordersearch-debug-ready" : "ordersearch-ready");
     }
   );
 }
@@ -989,82 +935,133 @@ async function postJson(path, payload) {
   return response.json();
 }
 
-function renderAnalysis(data) {
-  lastCategory = data.category || null;
-  lastSuggestedTemplateId = data.suggested_template_id || data.template_id || null;
-  elements.summary.value = data.summary || "";
-  elements.fields.textContent = JSON.stringify(data.extracted_fields || {}, null, 2);
-  const rawQ = data.clarification_questions;
-  const qList = Array.isArray(rawQ) ? rawQ : rawQ ? [String(rawQ)] : [];
-  elements.questions.value = qList.map((item) => `- ${item}`).join("\n");
-  elements.nextStep.value = data.next_step || "";
+// ── Chat ─────────────────────────────────────────────────────────────────────
 
-  const row = data.spreadsheet_row || "";
-  elements.spreadsheetRow.value = row;
-  elements.spreadsheetRowCard.style.display = row ? "" : "none";
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
-function renderDraft(data) {
-  renderAnalysis(data);
-  elements.draftReply.value = data.draft_reply || "";
+function applyInlineMarkdown(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
-async function analyzeThread() {
-  return runWithBusyState("analyzing", elements.analyzeBtn, "Analyzing...", async () => {
-    const data = await postJson("/analyze-thread", {
-      subject: elements.subject.value,
-      thread_text: elements.threadText.value,
-      thread_structured: lastThreadStructured,
-      language: "en"
+function renderMarkdown(raw) {
+  const lines = escapeHtml(raw).split("\n");
+  const out = [];
+  let inList = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^[-*]\s+/.test(trimmed)) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${applyInlineMarkdown(trimmed.replace(/^[-*]\s+/, ""))}</li>`);
+    } else {
+      if (inList) { out.push("</ul>"); inList = false; }
+      if (trimmed === "") {
+        out.push("<br>");
+      } else if (/^#{1,3}\s+/.test(trimmed)) {
+        out.push(`<strong>${applyInlineMarkdown(trimmed.replace(/^#{1,3}\s+/, ""))}</strong><br>`);
+      } else {
+        out.push(applyInlineMarkdown(trimmed) + "<br>");
+      }
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("");
+}
+
+function appendChatMessage(role, content) {
+  const wrap = document.createElement("div");
+  wrap.className = `chat-message chat-message-${role}`;
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble";
+  if (role === "assistant") {
+    bubble.innerHTML = renderMarkdown(content);
+  } else {
+    bubble.textContent = content;
+  }
+  wrap.appendChild(bubble);
+
+  if (role === "assistant") {
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "chat-copy-btn";
+    copyBtn.textContent = "Copy";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(content).then(() => {
+        copyBtn.textContent = "✓";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      });
     });
-    renderAnalysis(data);
-    setStatus("analyzed");
-  });
+    wrap.appendChild(copyBtn);
+  }
+
+  elements.chatMessages.appendChild(wrap);
+  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  return wrap;
 }
 
-async function generateDraft() {
-  return runWithBusyState("drafting", elements.generateBtn, "Generating...", async () => {
-    const data = await postJson("/generate-draft", {
-      category: lastCategory,
-      subject: elements.subject.value,
-      thread_text: elements.threadText.value,
-      thread_structured: lastThreadStructured,
-      manual_notes: elements.replyInstructions.value,
-      template_ids: lastSuggestedTemplateId ? [lastSuggestedTemplateId] : []
+function appendChatThinking() {
+  const wrap = document.createElement("div");
+  wrap.className = "chat-message chat-message-assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble chat-thinking";
+  bubble.textContent = "Thinking…";
+  wrap.appendChild(bubble);
+  elements.chatMessages.appendChild(wrap);
+  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  return wrap;
+}
+
+async function sendChatMessage(userText) {
+  const text = userText.trim();
+  if (!text) return;
+  if (activeOperation) return;
+
+  appendChatMessage("user", text);
+  chatHistory.push({ role: "user", content: text });
+  elements.chatInput.value = "";
+  elements.chatQuickActions.style.display = "none";
+
+  const thinkingEl = appendChatThinking();
+  elements.chatSendBtn.disabled = true;
+  setStatus("thinking…");
+
+  try {
+    const data = await postJson("/chat", {
+      messages: chatHistory.slice(-20),
+      thread_context: {
+        subject: elements.subject.value,
+        thread_text: elements.threadText.value,
+        thread_structured: lastThreadStructured
+      },
+      order_context: elements.manualLookup.value
     });
-    renderDraft(data);
-    setStatus("draft-ready");
-  });
-}
 
-async function refineDraft() {
-  return runWithBusyState("refining", elements.refineBtn, "Refining...", async () => {
-    const data = await postJson("/refine-draft", {
-      category: lastCategory,
-      thread_text: elements.threadText.value,
-      thread_structured: lastThreadStructured,
-      manual_lookup_result: elements.manualLookup.value,
-      previous_draft: elements.draftReply.value,
-      manual_notes: elements.replyInstructions.value,
-      template_ids: lastSuggestedTemplateId ? [lastSuggestedTemplateId] : []
-    });
-    renderDraft(data);
-    setStatus("refined");
-  });
-}
-
-async function copyDraft() {
-  return runWithBusyState("copying", elements.copyBtn, "Copying...", async () => {
-    await navigator.clipboard.writeText(elements.draftReply.value);
-    setStatus("copied");
-  });
+    thinkingEl.remove();
+    const reply = data.reply || "(no response)";
+    chatHistory.push({ role: "assistant", content: reply });
+    appendChatMessage("assistant", reply);
+    setStatus("ready");
+  } catch (error) {
+    thinkingEl.remove();
+    appendChatMessage("assistant", `Error: ${error.message}`);
+    setStatus("error");
+  } finally {
+    elements.chatSendBtn.disabled = false;
+  }
 }
 
 function clearPanel() {
-  lastCategory = null;
-  lastSuggestedTemplateId = null;
   lastThreadStructured = null;
   orderSearchContextPromise = null;
+  chatHistory.length = 0;
 
   elements.subject.value = "";
   elements.threadText.value = "";
@@ -1074,26 +1071,71 @@ function clearPanel() {
   elements.manualLookup.style.display = "";
   if (elements.lookupToggleBtn) elements.lookupToggleBtn.style.display = "none";
   elements.manualLookup.value = "";
-  elements.replyInstructions.value = "";
-  elements.summary.value = "";
-  elements.fields.textContent = "";
-  elements.questions.value = "";
-  elements.nextStep.value = "";
-  elements.draftReply.value = "";
-  elements.spreadsheetRow.value = "";
-  elements.spreadsheetRowCard.style.display = "none";
+  elements.chatMessages.innerHTML = "";
+  elements.chatInput.value = "";
+  elements.chatQuickActions.style.display = "";
   elements.debugInfo.textContent = "";
   setStatus("cleared");
 }
 
-function handleError(error) {
-  console.error(error);
-  setStatus("error");
-  elements.nextStep.value = error.message || String(error);
+function friendlyErrorMessage(error) {
+  const msg = error?.message || String(error);
+  if (/could not establish connection|receiving end does not exist/i.test(msg)) {
+    return "Content script not reachable. Please reload the Znuny ticket page, then try Capture again.";
+  }
+  if (/no active tab/i.test(msg)) {
+    return "No active tab found. Open a ticket page and try again.";
+  }
+  if (/no content script response/i.test(msg)) {
+    return "Could not extract content. Reload the ticket page and try again.";
+  }
+  return msg;
 }
 
-loadSettings().catch(handleError);
-elements.spreadsheetRow.addEventListener("click", () => elements.spreadsheetRow.select());
+function handleError(error) {
+  console.error(error);
+  setStatus("error: " + friendlyErrorMessage(error).slice(0, 60));
+}
+
+function handleCaptureError(error) {
+  console.error(error);
+  const msg = friendlyErrorMessage(error);
+  setStatus("error");
+  showStatusBanner(msg);
+}
+
+let bannerTimeout = null;
+function showStatusBanner(msg) {
+  let banner = document.getElementById("statusBanner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "statusBanner";
+    banner.className = "status-banner";
+    document.querySelector(".app").insertBefore(banner, document.querySelector(".action-bar"));
+  }
+  banner.textContent = msg;
+  banner.style.display = "";
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(() => { banner.style.display = "none"; }, 6000);
+}
+
+// ── Event listeners ───────────────────────────────────────────────────────────
+
+function addRipple(btn) {
+  btn.addEventListener("click", (e) => {
+    const r = document.createElement("span");
+    r.className = "ripple";
+    const rect = btn.getBoundingClientRect();
+    r.style.left = (e.clientX - rect.left) + "px";
+    r.style.top  = (e.clientY - rect.top)  + "px";
+    btn.appendChild(r);
+    r.addEventListener("animationend", () => r.remove());
+  });
+}
+addRipple(elements.captureBtn);
+addRipple(elements.chatSendBtn);
+
+loadSettings().catch(console.error);
 
 elements.lookupToggleBtn.addEventListener("click", () => {
   const showing = elements.orderResultsDisplay.style.display !== "none";
@@ -1123,15 +1165,56 @@ elements.orderResultsDisplay.addEventListener("click", (e) => {
     collapseBtn.textContent = collapsed ? `展开全部 (${total}条)` : "收起";
   }
 });
+
 elements.captureBtn.addEventListener("click", () => {
   captureThread()
     .then(() => autoSearchOrdersAfterCapture())
-    .catch(handleError);
+    .catch(handleCaptureError);
 });
-elements.orderSearchBtn.addEventListener("click", () => runOrderSearch().catch(handleError));
-elements.orderSearchDebugBtn.addEventListener("click", () => runOrderSearch({ includeDebug: true }).catch(handleError));
-elements.analyzeBtn.addEventListener("click", () => analyzeThread().catch(handleError));
-elements.generateBtn.addEventListener("click", () => generateDraft().catch(handleError));
+
+elements.orderSearchBtn.addEventListener("click", () => runOrderSearch().catch(handleCaptureError));
+elements.orderSearchDebugBtn.addEventListener("click", () => runOrderSearch({ includeDebug: true }).catch(handleCaptureError));
 elements.clearBtn.addEventListener("click", clearPanel);
-elements.refineBtn.addEventListener("click", () => refineDraft().catch(handleError));
-elements.copyBtn.addEventListener("click", () => copyDraft().catch(handleError));
+
+elements.chatSendBtn.addEventListener("click", () => sendChatMessage(elements.chatInput.value));
+
+function flashCopied(btn) {
+  const orig = btn.textContent;
+  btn.textContent = "✓";
+  btn.classList.add("copied");
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1500);
+}
+
+elements.copyTicketBtn.addEventListener("click", () => {
+  const subject = elements.subject.value;
+  const match = subject.match(/Ticket#?\s*([A-Z0-9-]+)/i);
+  const text = match ? match[1] : subject;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => flashCopied(elements.copyTicketBtn));
+});
+
+elements.copyEmailBtn.addEventListener("click", () => {
+  const email = elements.customerEmailInput.value.trim() || getCandidateCustomerEmail();
+  if (!email) return;
+  navigator.clipboard.writeText(email).then(() => flashCopied(elements.copyEmailBtn));
+});
+
+elements.chatClearBtn.addEventListener("click", () => {
+  chatHistory.length = 0;
+  elements.chatMessages.innerHTML = "";
+  elements.chatQuickActions.style.display = "";
+});
+
+elements.chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage(elements.chatInput.value);
+  }
+});
+
+elements.chatQuickActions.addEventListener("click", (e) => {
+  const chip = e.target.closest(".chat-chip");
+  if (chip) {
+    sendChatMessage(chip.dataset.msg || chip.textContent);
+  }
+});

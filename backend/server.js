@@ -3,9 +3,9 @@ const http = require("http");
 const path = require("path");
 const { URL } = require("url");
 const { loadTemplates, readJsonBody, sendJson, sendText } = require("./lib/helpers");
-const { analyzeThreadMock, extractFieldsMock, generateDraftMock, refineDraftMock } = require("./lib/mock-engine");
-const { analyzeThreadDeepSeek, generateDraftDeepSeek, refineDraftDeepSeek } = require("./lib/deepseek-engine");
-const { analyzeThreadOpenAI, generateDraftOpenAI, refineDraftOpenAI } = require("./lib/openai-engine");
+const { analyzeThreadMock, extractFieldsMock, generateDraftMock, refineDraftMock, chatMock } = require("./lib/mock-engine");
+const { analyzeThreadDeepSeek, generateDraftDeepSeek, refineDraftDeepSeek, chatDeepSeek } = require("./lib/deepseek-engine");
+const { analyzeThreadOpenAI, generateDraftOpenAI, refineDraftOpenAI, chatOpenAI } = require("./lib/openai-engine");
 
 function loadDotEnv() {
   const envPath = path.resolve(__dirname, "../.env");
@@ -215,6 +215,26 @@ async function routeRequest(req, res) {
       engine: usedEngine,
       category: body.category || "?",
       draft_chars: String(result.draft || "").length,
+      ms: Date.now() - t0
+    });
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (requestUrl.pathname === "/chat") {
+    let usedEngine = PROVIDER;
+    const result =
+      PROVIDER === "deepseek"
+        ? await chatDeepSeek({ model: MODEL, body })
+            .catch((err) => { usedEngine = "mock(fallback:" + err.message.slice(0, 40) + ")"; return chatMock(body); })
+        : PROVIDER === "openai"
+          ? await chatOpenAI({ model: MODEL, body })
+              .catch((err) => { usedEngine = "mock(fallback:" + err.message.slice(0, 40) + ")"; return chatMock(body); })
+          : chatMock(body);
+    log("POST /chat", {
+      engine: usedEngine,
+      turns: (body.messages || []).length,
+      reply_chars: String(result.reply || "").length,
       ms: Date.now() - t0
     });
     sendJson(res, 200, result);
