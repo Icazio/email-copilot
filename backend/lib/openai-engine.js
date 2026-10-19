@@ -10,27 +10,37 @@ const { buildSystemInstructions } = require("./prompt-loader");
 const { retrieve, buildContextBlock } = require("./knowledge-retriever");
 
 async function callResponsesAPI({ model, instructions, input }) {
-  const response = await fetch("https://api.openai.com/v1/responses", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model,
-      store: false,
-      input: [
-        {
-          role: "system",
-          content: [{ type: "input_text", text: instructions }]
-        },
-        {
-          role: "user",
-          content: [{ type: "input_text", text: input }]
-        }
-      ]
-    })
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let response;
+  try {
+    response = await fetch("https://api.openai.com/v1/responses", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        store: false,
+        input: [
+          {
+            role: "system",
+            content: [{ type: "input_text", text: instructions }]
+          },
+          {
+            role: "user",
+            content: [{ type: "input_text", text: input }]
+          }
+        ]
+      })
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    throw new Error(err.name === "AbortError" ? "terminated" : err.message);
+  }
+  clearTimeout(timer);
 
   if (!response.ok) {
     throw new Error(`OpenAI request failed: ${response.status} ${response.statusText}`);
@@ -164,21 +174,31 @@ async function refineDraftOpenAI({ model, body, templates }) {
 }
 
 async function callChatCompletions({ model, systemPrompt, messages }) {
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
-    },
-    body: JSON.stringify({
-      model,
-      max_tokens: 1600,
-      messages: [
-        { role: "system", content: systemPrompt },
-        ...messages
-      ]
-    })
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+  let response;
+  try {
+    response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.OPENAI_API_KEY}`
+      },
+      signal: controller.signal,
+      body: JSON.stringify({
+        model,
+        max_tokens: 1600,
+        messages: [
+          { role: "system", content: systemPrompt },
+          ...messages
+        ]
+      })
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    throw new Error(err.name === "AbortError" ? "terminated" : err.message);
+  }
+  clearTimeout(timer);
 
   if (!response.ok) {
     throw new Error(`OpenAI request failed: ${response.status} ${response.statusText}`);

@@ -39,8 +39,13 @@ function sendText(res, statusCode, text) {
 
 async function readJsonBody(req) {
   const chunks = [];
+  let size = 0;
 
   for await (const chunk of req) {
+    size += chunk.length;
+    if (size > 1024 * 1024) {
+      throw Object.assign(new Error("请求内容超过 1 MB"), { status: 413 });
+    }
     chunks.push(chunk);
   }
 

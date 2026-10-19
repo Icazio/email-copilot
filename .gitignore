@@ -1,4 +1,6 @@
 node_modules/
+backend/data/
+backend/.test-data-*/
 .env
 *.log
 backend/.cache/

@@ -51,14 +51,25 @@ async function callDeepSeekChat({ model, instructions, input, maxTokens = 1200 }
   writeLog(`\nUser Input:\n${input}`);
   writeLog("==========================================");
 
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`
-    },
-    body: JSON.stringify(requestPayload)
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  let response;
+  try {
+    response = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`
+      },
+      body: JSON.stringify(requestPayload),
+      signal: controller.signal
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    throw new Error(err.name === "AbortError" ? "terminated" : err.message);
+  }
+  clearTimeout(timer);
 
   if (!response.ok) {
     writeLog(`ERROR: DeepSeek API returned ${response.status} ${response.statusText}`);
@@ -257,17 +268,30 @@ async function callDeepSeekChatRaw({ model, systemPrompt, messages, maxTokens = 
     ...messages
   ];
 
-  const response = await fetch("https://api.deepseek.com/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`
-    },
-    body: JSON.stringify({ model, max_tokens: maxTokens, messages: requestMessages })
-  });
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 30000);
+
+  let response;
+  try {
+    response = await fetch("https://api.deepseek.com/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${process.env.DEEPSEEK_API_KEY}`
+      },
+      body: JSON.stringify({ model, max_tokens: maxTokens, messages: requestMessages }),
+      signal: controller.signal
+    });
+  } catch (err) {
+    clearTimeout(timer);
+    throw new Error(err.name === "AbortError" ? "terminated" : err.message);
+  }
+  clearTimeout(timer);
 
   if (!response.ok) {
-    throw new Error(`DeepSeek request failed: ${response.status} ${response.statusText}`);
+    const err = new Error(`DeepSeek request failed: ${response.status} ${response.statusText}`);
+    err.status = response.status;
+    throw err;
   }
 
   const data = await response.json();
@@ -329,6 +353,7 @@ async function chatDeepSeek({ model, body }) {
 
   const reply = await callDeepSeekChatRaw({ model, systemPrompt, messages, maxTokens: 2400 })
     .catch(async (err) => {
+      if (err.status === 503 || err.status === 429) throw err;
       writeLog(`[chat] first attempt failed (${err.message}), retrying once…`);
       return callDeepSeekChatRaw({ model, systemPrompt, messages, maxTokens: 2400 });
     });
