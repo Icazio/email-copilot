@@ -1,138 +1,107 @@
-# Email Copilot
+# Email Copilot MVP
 
-内部客服邮件助手：Chrome 侧栏插件、Node 后端，以及通过浏览器访问的知识与服务质量管理后台。沿用零第三方运行依赖的结构，要求 Node.js 22 或更高版本。
+This folder now contains:
 
-## 本地启动
+- Product and planning docs
+- A zero-dependency browser extension skeleton
+- A zero-dependency Node backend skeleton
+- Fixed support templates
+- Sample email threads
 
-1. 在项目根目录的 `.env` 中保留原有模型配置，并增加初始管理员配置：
+## Structure
 
-   ```dotenv
-   ADMIN_USERNAME=admin
-   ADMIN_PASSWORD=请替换为至少12个字符的独立密码
-   HOST=127.0.0.1
-   PORT=8787
-   ```
+```text
+email/
+  backend/
+  extension/
+  templates/
+  samples/
+  package.json
+  run-backend.cmd
+```
 
-2. 运行 `npm start` 或 `run-backend.cmd`。
-3. 访问 <http://localhost:8787/admin/>，使用刚配置的管理员账号登录。
+## MVP scope
 
-管理员配置仅在数据目录中还没有账号时创建初始账号。已有账号时，修改环境密码不会重设账号密码；请通过「账号与设置」重设。初始账号创建后可以从环境中移除 `ADMIN_PASSWORD`。密码以随机盐与 scrypt 哈希存储，登录会话保存在内存，服务重启后需重新登录。
+- Internal support copilot only
+- Browser extension side panel
+- Read-only workflow
+- English draft replies
+- Manual final send by the agent
+- Manual lookup results pasted back into the copilot
 
-没有设置初始账号时，登录页会显示配置说明，没有默认密码。`.env.example` 提供完整配置示例，复制时不要覆盖已有 `.env` 中的模型密钥。
+## Run backend
 
-## 第一次配置内容
+Use `cmd`:
 
-1. 打开「产品管理」，新建各个实际产品，填写名称、产品别名、订单商品名、关联队列。
-2. 一个队列可以关联多个产品。产品别名和订单商品名用于辅助识别，请避免各产品使用相同简称。
-3. 分别维护业务知识、英文回复模板和 AI 规则；保存后均为草稿。
-4. 在测试工作台选择产品，粘贴邮件，可补充订单信息，测试已发布内容或包含草稿的内容。
-5. 检查结果后，在「发布与历史」勾选要发布的修改，相关知识、模板和规则一起生效。
+```bat
+run-backend.cmd
+```
 
-没有任何产品时，可以通过「导入原有内容」导入项目原来的知识、模板、分类及处理指引。它们先进入「AVCLabs（原有内容，待细分）」产品的草稿，**不会自动发布**。请检查产品适用范围，将内部资料移到「内部说明」，再发布。也可在新建产品时复制已有产品的已发布内容；复制后独立维护。
+Or:
 
-产品名称、别名、队列映射、商品名及启用状态保存后立即生效；知识、模板和规则通过发布生效。停用条目也需要发布。发布支持选择部分修改，有未发布草稿时禁止直接恢复旧版本，以免覆盖草稿。
+```bat
+node backend\server.js
+```
 
-模板支持 `{{customer_name}}` 等变量。固定表述必须出现在模板正文中，使用该模板生成回复时会检查是否保留；变量仍未填写时会提示检查。内部说明会作为内部处理上下文交给模型，要求其不写入客户回复；仍需人工检查生成内容。
+If you want `openai` mode, create a root `.env` file first:
 
-知识正文支持 Markdown。已有条目默认展示预览，点击「编辑」修改源码，点击「预览」查看排版；支持标题、强调、列表、表格、引用、代码块和链接。测试引用、反馈与历史版本中的知识正文也按 Markdown 展示。保存和发布保留源码，原始 HTML 不执行，图片不自动加载。
-
-第一版使用关键词与文本匹配检索，每类最多提供 6 条相关知识或模板给模型，适用环节的规则会同时提供。建议填写中文、英文等实际邮件语言的关键词。测试的「引用内容」展示提供给模型的条目，「已使用」标记来自模型报告，供人工核对。
-
-## 连接客服插件
-
-1. 在 Chrome 扩展管理页加载或重新加载 `extension` 文件夹。
-2. 在插件 Config 填写服务地址；公司服务器部署还须填写助手访问密钥，并点「保存连接设置」。
-3. 在实际工单页点 Capture。插件提取工单编号、队列、邮件内容，并结合订单识别主要产品。
-4. 邮件与订单涉及多个产品或没有明确结果时，由客服选择一个主要产品。客服也可以随时纠正选择。
-5. 切换产品会清除旧产品的对话与回复，须重新生成；不会修改后台队列配置。
-6. 每条助手结果下面可自愿填写满意度、准确性、问题原因和备注。同一结果再次提交会更新评价，不会增加一条重复评价。
-
-「总结问题」「还需问什么」「下一步」返回面向客服的中文分析，「写回复」生成英文邮件。快捷操作在对话过程中保持可用。自由提问按最新问题回答，不会因为之前写过邮件就一直输出邮件草稿。
-
-需要捕获到工单标识才会生成正式结果和统计记录。工单标识为站点与 TicketID 的组合；暂不接入工单完成状态，Dashboard 使用「助手协助工单」口径。
-
-## Dashboard 统计口径
-
-- 时间范围为最近 7、30、90 个自然日，业务时区为 Asia/Shanghai；可按产品筛选，不收集客服个人身份或个人统计。
-- 协助工单数按工单标识去重，同一工单多次生成只计一个；回复生成次数包含对话、生成与修改回复请求。
-- 满意度 = 满意次数 / 已填写满意度的评价次数。
-- 客服评价准确率 = 准确次数 / 已填写准确性的有效评价次数。「部分准确」「不准确」计入分母，「无法判断」单独显示。
-- 评价覆盖率 = 至少有一次评价的工单数 / 使用过助手的工单数。
-- 评价绑定到生成时的产品、版本、模型模式、结果与上下文快照，后续发布不会改写历史依据。
-- 管理后台测试不计入正式统计。`mock` 模式的正式插件使用仍会记录并标注为演示；评估真实模型前请使用单独的数据目录进行演示。
-
-准确率来自自愿提交的客服反馈，不能等同于所有工单的客观准确率，应同时看评价数量和覆盖率。
-
-## 公司服务器部署
-
-代码已支持公司服务器部署；仓库本身不会自动连接或部署到公司主机。
-
-1. 将项目放到安装有 Node.js 22+ 的服务器。
-2. 配置模型服务、初始管理员、持久化目录和助手访问密钥。
-3. 通过服务器现有进程管理工具运行 `node backend/server.js`，保持**单个实例**常驻。
-4. 推荐在公司 HTTPS 反向代理下提供后台和助手接口。反向代理保持 Host 请求头，将 `/` 转发到 Node 服务，读取超时至少 60 秒。
-
-示例配置：
-
-```dotenv
-AI_PROVIDER=deepseek
-DEEPSEEK_API_KEY=填写现有密钥
-DEEPSEEK_MODEL=deepseek-v4-flash
-HOST=127.0.0.1
+```text
+OPENAI_API_KEY=your_openai_api_key_here
+OPENAI_MODEL=gpt-5-mini
 PORT=8787
-ADMIN_USERNAME=admin
-ADMIN_PASSWORD=请替换为至少12个字符的独立密码
-ADMIN_DATA_DIR=D:/copilot-data
-COPILOT_ACCESS_TOKEN=请替换为随机生成的长密钥并配置到客服插件
-ADMIN_ORIGIN=https://copilot.company.example
-ADMIN_SECURE_COOKIE=true
-NODE_ENV=production
 ```
 
-`ADMIN_DATA_DIR` 在 Linux 上可使用绝对路径，例如 `/var/lib/email-copilot`，运行账号须有写权限。若直接通过公司网络访问 Node，可将 `HOST` 改为 `0.0.0.0`；配置好 HTTPS 后再开启 Secure Cookie。启用 HTTPS 后，插件 Backend URL 填写同一 HTTPS 服务地址。
+You can copy from `.env.example`.
 
-非本地部署必须配置 `COPILOT_ACCESS_TOKEN`，否则服务会拒绝启动。管理员使用独立账号；客服插件只使用助手访问密钥，不能用该密钥编辑后台。管理员写操作校验会话、请求来源和 CSRF 凭证；账号重设密码或停用后，已有登录会失效。
-
-OpenAI 模式沿用 `OPENAI_API_KEY`、`OPENAI_MODEL`，通过 Responses API 生成结果；[官方文本生成文档](https://developers.openai.com/api/docs/guides/text)说明了 REST 输出结构。DeepSeek 沿用现有 Chat Completions 配置。模型不可用或返回格式异常时会显示错误，**不会静默改用演示结果**。设置 `AI_PROVIDER=mock` 可在不调用模型的情况下检查页面与流程。
-
-## 数据与备份
-
-第一版将数据存放在 `backend/data/admin.json`，也可以通过 `ADMIN_DATA_DIR` 指定目录。包括管理员密码哈希、产品资料、草稿、版本快照、使用记录、评价及管理员操作记录。生成结果与被引用资料可能包含客户信息，请将数据目录纳入公司现有访问控制与备份流程。
-
-当前是**单 Node 进程、单数据文件**的存储实现，写入通过临时文件与原子替换完成，并校验编辑版本以避免管理员互相覆盖。不要用多个 Node 进程、集群模式或多台主机共享同一数据文件；数据量增长或需要多实例时应迁移到数据库。
-
-备份时停止服务并复制完整数据目录；恢复时停止服务、替换数据目录后再启动。数据目录和测试截图已加入 Git 忽略列表。服务器重启不丢失内容和统计，浏览器会话需要重新登录。
-
-## 验证
+Default server URL:
 
 ```text
-npm run check
-npm test
-npm run test:browser
+http://localhost:8787
 ```
 
-语法检查覆盖后端、后台前端和插件代码。测试覆盖原有多语言检索、登录权限、CSRF、产品识别与隔离、草稿发布、版本恢复、模型输出解析、反馈去重及统计口径。
+## Load extension
 
-可选浏览器测试使用已安装的 Chrome 或 Edge，无需安装 npm 包；也可通过 `BROWSER_EXECUTABLE_PATH` 指定路径。测试使用独立临时数据与演示模式，覆盖后台操作及带 Chrome API 测试替身的插件面板，不调用真实模型、不改变正式账号。截图位于 `backend/.cache/admin-preview/`。真实 Znuny 页面捕获与实际模型回复仍需在公司环境验收。
+1. Open `chrome://extensions`
+2. Enable `Developer mode`
+3. Click `Load unpacked`
+4. Select the `extension` folder
+5. Open the target email page
+6. Click the extension icon to open the side panel
 
-## 主要目录与接口
+## Backend modes
+
+The backend supports two modes:
+
+The backend supports three modes:
+
+- `mock`
+  Default. Uses local heuristics and templates.
+- `deepseek`
+  Enabled when `AI_PROVIDER=deepseek` or `DEEPSEEK_API_KEY` is set.
+- `openai`
+  Enabled when `AI_PROVIDER=openai` or `OPENAI_API_KEY` is set.
+
+Optional environment variables:
 
 ```text
-backend/admin/              管理后台 HTML / CSS / JavaScript
-backend/lib/admin-store.js  内容、版本、账号、使用记录与统计
-backend/lib/admin-router.js 登录权限、管理 API、助手 API
-backend/lib/managed-engine.js 产品隔离、上下文检索及模型调用
-extension/                  Chrome 侧栏插件
-knowledge/ templates/ backend/prompts/  原有资料，保留作为导入来源
+AI_PROVIDER=deepseek
+DEEPSEEK_API_KEY=...
+DEEPSEEK_MODEL=deepseek-v4-flash
+OPENAI_API_KEY=...
+OPENAI_MODEL=gpt-5-mini
+PORT=8787
 ```
 
-- `GET /health`：服务状态。
-- `GET /admin/`：管理后台。
-- `/api/admin/*`：管理员会话保护的管理接口。
-- `GET /api/copilot/products`：产品识别资料。
-- `POST /api/copilot/resolve-product`：识别主要产品。
-- `POST /api/copilot/feedback`：提交或更新自愿评价。
-- `POST /chat`、`/analyze-thread`、`/generate-draft`、`/refine-draft`：使用所选产品的已发布内容，推荐传 `ticket_id`，可传 `product_id` 手动指定。兼容旧插件的 `Ticket#…` 主题、嵌套工单标识及工单页面 URL；没有真实编号时不会用普通主题或邮件正文生成统计标识。
-- `POST /extract-fields`：保留字段提取功能。
+## Main endpoints
 
-客服接口通过 `Authorization: Bearer <COPILOT_ACCESS_TOKEN>` 访问。本地开发时可在回环地址省略密钥。管理员会话有效期为 8 小时。
+- `GET /health`
+- `POST /extract-fields`
+- `POST /analyze-thread`
+- `POST /generate-draft`
+- `POST /refine-draft`
+
+## Notes
+
+- The extension uses generic DOM extraction heuristics because no real Centuran DOM selectors are known yet.
+- The backend is intentionally simple so you can iterate without package installs.
+- The next recommended step is to replace generic thread extraction with real Centuran selectors and to expand the template pack using real support emails.

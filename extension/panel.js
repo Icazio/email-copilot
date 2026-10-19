@@ -29,13 +29,6 @@ let orderSearchContextPromise = null;
 let activeOperation = null;
 let autoOrderSearchEnabled = true;
 const chatHistory = [];
-let currentTicketId = '';
-let currentTicketUrl = '';
-let currentQueue = '';
-let manualProduct = false;
-let productCatalog = [];
-const productSelect = document.getElementById('productSelect');
-const productReason = document.getElementById('productReason');
 
 const DEFAULTS = {
   backendUrl: "http://localhost:8787",
@@ -121,14 +114,12 @@ function getBackendUrl() {
 async function loadSettings() {
   const stored = await chrome.storage.local.get([
     "backendUrl",
-    "copilotToken",
     "subjectSelectors",
     "threadSelectors",
     "messageSelectors"
   ]);
 
   elements.backendUrl.value = stored.backendUrl || DEFAULTS.backendUrl;
-  document.getElementById('copilotToken').value = stored.copilotToken || '';
   elements.subjectSelectors.value = stored.subjectSelectors || DEFAULTS.subjectSelectors;
   elements.threadSelectors.value = stored.threadSelectors || DEFAULTS.threadSelectors;
   elements.messageSelectors.value = stored.messageSelectors || DEFAULTS.messageSelectors;
@@ -137,7 +128,6 @@ async function loadSettings() {
 async function saveSettings() {
   await chrome.storage.local.set({
     backendUrl: elements.backendUrl.value,
-    copilotToken: document.getElementById('copilotToken').value,
     subjectSelectors: elements.subjectSelectors.value,
     threadSelectors: elements.threadSelectors.value,
     messageSelectors: elements.messageSelectors.value
@@ -210,29 +200,10 @@ async function captureThread() {
 
     elements.subject.value = response.subject || "";
     elements.threadText.value = response.thread_text || "";
-    const ticketIdentity = resolveCapturedTicket(response, responses, tab);
-    const nextTicketId = ticketIdentity.id;
-    if (nextTicketId !== currentTicketId || !nextTicketId) {
-      manualProduct = false;
-      productSelect.value = '';
-      chatHistory.length = 0;
-      elements.chatMessages.innerHTML = '';
-      elements.chatQuickActions.style.display = '';
-      elements.manualLookup.value = '';
-      elements.orderResultsDisplay.innerHTML = '';
-      elements.orderResultsDisplay.style.display = 'none';
-      elements.manualLookup.style.display = '';
-      elements.customerEmailInput.value = '';
-    }
-    currentTicketId = nextTicketId;
-    currentTicketUrl = ticketIdentity.url;
-    currentQueue = response.queue || responses.find(item => item?.queue)?.queue || '';
     lastThreadStructured = response.thread_structured || null;
     elements.debugInfo.textContent = JSON.stringify(
       {
         ...(response.debug || {}),
-        ticket_id: currentTicketId,
-        ticket_source_url: currentTicketUrl,
         selected_frame_url: response.frame_url || response.url || "",
         selected_frame_context: response.frame_context || "",
         frame_candidates: responses.map((item) => ({
@@ -256,29 +227,6 @@ async function captureThread() {
       elements.customerEmailInput.value = detectedEmail;
     }
   });
-}
-
-function resolveCapturedTicket(response, responses, tab) {
-  const urls = [tab.url, response.source_url, response.url, response.frame_url, ...responses.flatMap(item => [item?.source_url, item?.url, item?.frame_url])].filter(Boolean);
-  const urlIdentity = value => {
-    try {
-      const url = new URL(value);
-      if (!['http:', 'https:'].includes(url.protocol)) return null;
-      const match = url.search.match(/(?:[?;&])TicketID=([^;#&]+)/i);
-      const number = match && decodeURIComponent(match[1]);
-      return number && /^\d{1,32}$/.test(number) ? { id: url.host + ':' + number, url: value } : null;
-    } catch { return null; }
-  };
-  // Prefer the top-level ticket URL over whichever article iframe has the most text.
-  for (const value of urls) { const match = urlIdentity(value); if (match) return match; }
-  const explicit = response.ticket_id || response.thread_structured?.ticket_id || responses.find(item => item?.ticket_id)?.ticket_id;
-  if (explicit) return { id: explicit, url: urls[0] || '' };
-  const subjects = [response.subject, response.thread_structured?.ticket_subject, ...responses.map(item => item?.subject)];
-  for (const value of subjects) {
-    const match = String(value || '').match(/^\s*(?:\[\s*)?(?:Ticket\s*#\s*|工单(?:号)?\s*[:：#]\s*)(\d{5,32})(?!\d)/i);
-    if (match) return { id: 'ticket-number:' + match[1], url: urls[0] || '' };
-  }
-  return { id: '', url: urls[0] || '' };
 }
 
 async function autoSearchOrdersAfterCapture() {
@@ -967,8 +915,7 @@ async function postJson(path, payload) {
   try {
     response = await fetch(url, {
       method: "POST",
-      credentials: "omit",
-      headers: { "Content-Type": "application/json", ...copilotHeaders() },
+      headers: { "Content-Type": "application/json" },
       body: JSON.stringify(payload)
     });
   } catch (error) {
@@ -987,84 +934,6 @@ async function postJson(path, payload) {
 
   return response.json();
 }
-
-function copilotHeaders() {
-  const token = document.getElementById('copilotToken').value.trim();
-  return token ? { Authorization: 'Bearer ' + token } : {};
-}
-
-async function loadProductCatalog() {
-  const response = await fetch(getBackendUrl() + '/api/copilot/products', { credentials: 'omit', headers: copilotHeaders() });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || '无法读取产品列表');
-  productCatalog = data;
-  const selected = productSelect.value;
-  productSelect.replaceChildren(new Option('自动识别 / 请选择', ''));
-  productCatalog.forEach(p => productSelect.add(new Option(p.name, p.id)));
-  if (productCatalog.some(p => p.id === selected)) productSelect.value = selected;
-  productReason.textContent = productCatalog.length ? '根据工单队列、邮件和订单识别，可手动纠正。' : '请先在管理后台创建产品并发布内容。';
-}
-
-function clearProductConversation() {
-  chatHistory.length = 0;
-  elements.chatMessages.innerHTML = '';
-  elements.chatQuickActions.style.display = '';
-}
-
-async function resolveCurrentProduct() {
-  if (manualProduct) return;
-  const result = await postJson('/api/copilot/resolve-product', {
-    subject: elements.subject.value, thread_text: elements.threadText.value,
-    order_context: elements.manualLookup.value, queue: currentQueue
-  });
-  const next = result.product?.id || '';
-  if (next && !productCatalog.some(p => p.id === next)) await loadProductCatalog();
-  if (productSelect.value !== next) clearProductConversation();
-  productSelect.value = next;
-  productReason.textContent = result.reason;
-}
-
-function appendFeedback(container, result) {
-  const form = document.createElement('form'); form.className = 'assistant-feedback';
-  const title = document.createElement('small');
-  title.textContent = result.product_name + ' · v' + result.version + (result.mode === 'mock' ? ' · 演示模式' : '') + ' · 自愿评价';
-  form.appendChild(title);
-  const makeSelect = (name, label, values) => {
-    const select = document.createElement('select'); select.name = name; select.setAttribute('aria-label', label);
-    select.add(new Option(label + '（选填）', ''));
-    values.forEach(([value,text]) => select.add(new Option(text,value)));
-    form.appendChild(select); return select;
-  };
-  const satisfaction = makeSelect('satisfaction','是否有帮助', [['satisfied','满意'],['neutral','一般'],['unsatisfied','不满意']]);
-  const accuracy = makeSelect('accuracy','内容是否准确', [['accurate','准确'],['partial','部分准确'],['inaccurate','不准确'],['unknown','无法判断']]);
-  const reason = makeSelect('reason','问题原因', [['产品识别错误','产品识别错误'],['政策错误','政策错误'],['信息遗漏','信息遗漏'],['英文表达问题','英文表达问题'],['其他','其他']]);
-  const note = document.createElement('input'); note.name='note'; note.placeholder='补充说明（选填）'; note.maxLength=2000; note.setAttribute('aria-label','评价补充说明'); form.appendChild(note);
-  const submit = document.createElement('button'); submit.textContent='提交评价'; submit.className='btn-secondary'; form.appendChild(submit);
-  const status = document.createElement('small'); status.setAttribute('role','status'); form.appendChild(status);
-  form.addEventListener('submit', async event => {
-    event.preventDefault(); submit.disabled=true;
-    try {
-      await postJson('/api/copilot/feedback', { event_id: result.event_id, feedback_key: result.feedback_key, satisfaction:satisfaction.value, accuracy:accuracy.value, reason:reason.value, note:note.value });
-      status.textContent='已评价，感谢反馈'; submit.textContent='更新评价';
-    } catch (error) { status.textContent=error.message; }
-    finally { submit.disabled=false; }
-  });
-  container.appendChild(form);
-}
-
-productSelect.addEventListener('change', () => {
-  manualProduct = Boolean(productSelect.value);
-  clearProductConversation();
-  productReason.textContent = manualProduct ? '客服手动选择，仅影响当前工单；已清除旧产品对话，请重新生成。' : '发送前将重新自动识别产品。';
-});
-document.getElementById('resolveProductBtn').addEventListener('click', async () => {
-  manualProduct=false;
-  try { await loadProductCatalog(); await resolveCurrentProduct(); } catch(error) { showStatusBanner(error.message); }
-});
-document.getElementById('saveConnectionBtn').addEventListener('click', async () => {
-  try { await saveSettings(); manualProduct=false; productSelect.value=''; clearProductConversation(); await loadProductCatalog(); showStatusBanner('连接设置已保存'); }
-  catch(error) { showStatusBanner(error.message); }
-});
 
 // ── Chat ─────────────────────────────────────────────────────────────────────
 
@@ -1107,7 +976,7 @@ function renderMarkdown(raw) {
   return out.join("");
 }
 
-function appendChatMessage(role, content, result) {
+function appendChatMessage(role, content) {
   const wrap = document.createElement("div");
   wrap.className = `chat-message chat-message-${role}`;
 
@@ -1120,11 +989,6 @@ function appendChatMessage(role, content, result) {
   }
   wrap.appendChild(bubble);
 
-  if (result?.warnings?.length) {
-    const warning = document.createElement('small'); warning.className = 'assistant-warning';
-    warning.textContent = result.warnings.join(' '); wrap.appendChild(warning);
-  }
-
   if (role === "assistant") {
     const copyBtn = document.createElement("button");
     copyBtn.className = "chat-copy-btn";
@@ -1136,7 +1000,6 @@ function appendChatMessage(role, content, result) {
       });
     });
     wrap.appendChild(copyBtn);
-    if (result?.event_id) appendFeedback(wrap, result);
   }
 
   elements.chatMessages.appendChild(wrap);
@@ -1156,36 +1019,15 @@ function appendChatThinking() {
   return wrap;
 }
 
-async function sendChatMessage(userText, task = 'chat') {
+async function sendChatMessage(userText) {
   const text = userText.trim();
   if (!text) return;
   if (activeOperation) return;
-  if (!currentTicketId) {
-    const recovered = resolveCapturedTicket({ subject: elements.subject.value, thread_structured: lastThreadStructured }, [], { url: currentTicketUrl });
-    currentTicketId = recovered.id;
-    if (!currentTicketId) { showStatusBanner('未识别到工单编号，请在工单页面重新 Capture。'); return; }
-  }
-  activeOperation = 'chat';
-  setCaptureBusy(true);
-  productSelect.disabled = true;
-  document.getElementById('resolveProductBtn').disabled = true;
-  elements.chatSendBtn.disabled = true;
-  elements.chatClearBtn.disabled = true;
-  try {
-    if (!manualProduct) await resolveCurrentProduct();
-    if (!productSelect.value) throw new Error('请先选择一个主要产品。');
-  } catch (error) {
-    showStatusBanner(error.message);
-    activeOperation = null; setCaptureBusy(false); productSelect.disabled = false;
-    document.getElementById('resolveProductBtn').disabled = false;
-    elements.chatSendBtn.disabled = false; elements.chatClearBtn.disabled = false;
-    return;
-  }
 
   appendChatMessage("user", text);
   chatHistory.push({ role: "user", content: text });
   elements.chatInput.value = "";
-  elements.chatQuickActions.style.display = "";
+  elements.chatQuickActions.style.display = "none";
 
   const thinkingEl = appendChatThinking();
   elements.chatSendBtn.disabled = true;
@@ -1193,15 +1035,8 @@ async function sendChatMessage(userText, task = 'chat') {
 
   try {
     const data = await postJson("/chat", {
-      task,
-      product_id: productSelect.value,
-      ticket_id: currentTicketId,
-      source_url: currentTicketUrl,
-      queue: currentQueue,
       messages: chatHistory.slice(-20),
       thread_context: {
-        ticket_id: currentTicketId,
-        source_url: currentTicketUrl,
         subject: elements.subject.value,
         thread_text: elements.threadText.value,
         thread_structured: lastThreadStructured
@@ -1212,30 +1047,18 @@ async function sendChatMessage(userText, task = 'chat') {
     thinkingEl.remove();
     const reply = data.reply || "(no response)";
     chatHistory.push({ role: "assistant", content: reply });
-    appendChatMessage("assistant", reply, data);
+    appendChatMessage("assistant", reply);
     setStatus("ready");
   } catch (error) {
-    if (chatHistory.at(-1)?.role === 'user') chatHistory.pop();
     thinkingEl.remove();
     appendChatMessage("assistant", `Error: ${error.message}`);
     setStatus("error");
   } finally {
-    activeOperation = null;
-    setCaptureBusy(false);
-    productSelect.disabled = false;
-    document.getElementById('resolveProductBtn').disabled = false;
-    elements.chatClearBtn.disabled = false;
     elements.chatSendBtn.disabled = false;
   }
 }
 
 function clearPanel() {
-  currentTicketId = '';
-  currentTicketUrl = '';
-  currentQueue = '';
-  manualProduct = false;
-  productSelect.value = '';
-  productReason.textContent = '根据工单队列、邮件和订单识别，可手动纠正。';
   lastThreadStructured = null;
   orderSearchContextPromise = null;
   chatHistory.length = 0;
@@ -1312,7 +1135,7 @@ function addRipple(btn) {
 addRipple(elements.captureBtn);
 addRipple(elements.chatSendBtn);
 
-loadSettings().then(loadProductCatalog).catch(error => { productReason.textContent = error.message; });
+loadSettings().catch(console.error);
 
 elements.lookupToggleBtn.addEventListener("click", () => {
   const showing = elements.orderResultsDisplay.style.display !== "none";
@@ -1346,7 +1169,6 @@ elements.orderResultsDisplay.addEventListener("click", (e) => {
 elements.captureBtn.addEventListener("click", () => {
   captureThread()
     .then(() => autoSearchOrdersAfterCapture())
-    .then(() => resolveCurrentProduct())
     .catch(handleCaptureError);
 });
 
@@ -1393,6 +1215,6 @@ elements.chatInput.addEventListener("keydown", (e) => {
 elements.chatQuickActions.addEventListener("click", (e) => {
   const chip = e.target.closest(".chat-chip");
   if (chip) {
-    sendChatMessage(chip.dataset.msg || chip.textContent, chip.dataset.task || 'chat');
+    sendChatMessage(chip.dataset.msg || chip.textContent);
   }
 });

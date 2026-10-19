@@ -73,13 +73,6 @@
       </div>
 
       <!-- Chatbox -->
-      <div class="card">
-        <div class="field-group">
-          <label for="productSelect">主要产品</label>
-          <div class="search-row"><select id="productSelect"><option value="">自动识别 / 请选择</option></select><button id="resolveProductBtn" class="btn-secondary">重新识别</button></div>
-          <small id="productReason">根据工单队列、邮件和订单识别，可手动纠正。</small>
-        </div>
-      </div>
       <div class="chat-wrap">
         <!-- messages area -->
         <div class="chat-body">
@@ -92,10 +85,10 @@
         <!-- footer: chips + input -->
         <div class="chat-footer">
           <div class="chat-quick-actions" id="chatQuickActions">
-            <button class="chat-chip" data-task="draft" data-msg="帮我写一封英文回复邮件。">写回复</button>
-            <button class="chat-chip" data-task="summary" data-msg="用2-3句话总结一下客户的问题。">总结问题</button>
-            <button class="chat-chip" data-task="questions" data-msg="我还需要向客户询问哪些信息？">还需问什么</button>
-            <button class="chat-chip" data-task="next_step" data-msg="这个工单下一步应该怎么处理？">下一步</button>
+            <button class="chat-chip" data-msg="帮我写一封英文回复邮件。">写回复</button>
+            <button class="chat-chip" data-msg="用2-3句话总结一下客户的问题。">总结问题</button>
+            <button class="chat-chip" data-msg="我还需要向客户询问哪些信息？">还需问什么</button>
+            <button class="chat-chip" data-msg="这个工单下一步应该怎么处理？">下一步</button>
           </div>
           <div class="chat-input-row">
             <textarea id="chatInput" rows="2" placeholder="随时提问…"></textarea>
@@ -110,11 +103,6 @@
         <div class="field-group">
           <label for="backendUrl">Backend URL</label>
           <input id="backendUrl" type="text" value="http://localhost:8787" />
-        </div>
-        <div class="field-group">
-          <label for="copilotToken">助手访问密钥</label>
-          <input id="copilotToken" type="password" autocomplete="off" placeholder="公司服务器配置的 COPILOT_ACCESS_TOKEN" />
-          <button id="saveConnectionBtn" class="btn-secondary">保存连接设置</button>
         </div>
         <details class="subtle-details">
           <summary>Centuran Selectors</summary>

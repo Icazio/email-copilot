@@ -215,19 +215,6 @@ function extractEmailsFromText(text) {
     );
   }
 
-  function getTicketQueue() {
-    for (const label of document.querySelectorAll('label, dt, th')) {
-      if (/^(队列|Queue)\s*[:：]?$/i.test(cleanText(label.textContent))) {
-        const value = label.nextElementSibling;
-        if (value && !value.querySelector('select') && !value.matches('select,input')) {
-          const result = cleanText(value.textContent);
-          if (result && result.length < 200) return result;
-        }
-      }
-    }
-    return cleanText(document.querySelector('[data-ticket-queue]')?.getAttribute('data-ticket-queue') || '');
-  }
-
   function getIframeUrlMap() {
     return new Map(
       Array.from(document.querySelectorAll("iframe[id^='Iframe']"))
@@ -500,8 +487,6 @@ function extractEmailsFromText(text) {
       rows,
       structured: {
         page_type: "znuny-ticket",
-        ticket_id: getTicketId() ? location.host + ':' + getTicketId() : '',
-        source_url: location.href,
         ticket_subject: ticketSubject,
         articles: rows.map((row) => ({
           ...row,
@@ -925,10 +910,7 @@ function extractEmailsFromText(text) {
         frame_url: location.href,
         frame_context: window.top === window ? "top" : "iframe",
         url: location.href,
-        source_url: location.href,
         title: document.title,
-        ticket_id: getTicketId() ? location.host + ':' + getTicketId() : '',
-        queue: getTicketQueue(),
         subject: subjectResult.subject,
         thread_text: threadResult.thread_text,
         thread_structured: threadResult.structured || null,
