@@ -4,13 +4,13 @@
       "id": "policy-001",
       "title": "Refund Handling Process",
       "tags": ["refund", "process", "submit", "approve", "refunded", "退款流程", "返金", "remboursement", "Rückerstattung", "reembolso"],
-      "content": "When a refund request is eligible, the agent submits the order details and refund reason through the ticket system to the responsible person who processes it. Do not directly promise the refund in the reply. Standard reply when request is received: 'We have received your request and will assist you in submitting your refund request. You will be notified by email upon success.' After the refund is successfully processed, use the 'refunded' template to notify the customer. Refund processing time: 3–10 working days depending on payment method (Paddle or Stripe)."
+      "content": "When a refund request is eligible, the agent submits the refund internally (internal step — never mention it, a 'responsible team' or any other team to the customer; in the email, 'we' handle the refund). Do not directly promise the refund in the reply unless the agent confirms it is approved. Standard reply when request is received: 'We have received your request and will assist you in submitting your refund request. You will be notified by email upon success.' After the refund is successfully processed, use the 'refunded' template to notify the customer. Refund processing time: 3–10 working days depending on payment method (Paddle or Stripe)."
     },
     {
       "id": "policy-002",
       "title": "Auto-Renewal Cancellation Process",
       "tags": ["cancel", "auto-renewal", "cancellation", "unsubscribe", "stop renewal", "取消续订", "キャンセル", "annuler", "annulation", "kündigen", "Kündigung", "cancelar", "cancelación"],
-      "content": "If a customer requests cancellation of auto-renewal, the agent submits the request through the ticket system to the responsible team. Standard reply when request is received: 'We have received your request and will assist you in submitting your request to cancel your auto-renewal. You will be notified by email upon success.' After cancellation is processed, use the 'cancel' template to notify the customer."
+      "content": "If a customer requests cancellation of auto-renewal, the agent processes the cancellation internally (internal step — never mention a 'responsible team' or any other team to the customer; in the email, 'we' handle it). Standard reply when request is received: 'We have received your request and will assist you in submitting your request to cancel your auto-renewal. You will be notified by email upon success.' After cancellation is processed, use the 'cancel' template to notify the customer."
     },
     {
       "id": "policy-003",

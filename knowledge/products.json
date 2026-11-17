@@ -22,7 +22,7 @@
       "id": "product-004",
       "title": "Auto-Renewal Subscription",
       "tags": ["auto-renewal", "renewal", "subscription", "cancel", "recurring", "charge", "automatic", "续订", "自动扣款", "キャンセル", "annuler", "annulation", "kündigen", "Kündigung", "cancelar", "cancelación"],
-      "content": "Subscriptions renew automatically by default. Customers can cancel auto-renewal themselves via the link in their subscription email, or by contacting support. If a customer was charged within the 5-day refund window and wishes to cancel, the standard refund policy applies. Cancellation and renewal-related refunds are handled by submitting the request through the ticket system to the responsible team."
+      "content": "Subscriptions renew automatically by default. Customers can cancel auto-renewal themselves via the link in their subscription email, or by contacting support. If a customer was charged within the 5-day refund window and wishes to cancel, the standard refund policy applies. Refunding a subscription order also ends that subscription, so when a refund is processed no separate cancellation is needed or mentioned. Cancellation and renewal-related refunds are handled by our support team directly — in the email, say 'we' will handle it; never mention a 'responsible team'."
     },
     {
       "id": "product-005",
