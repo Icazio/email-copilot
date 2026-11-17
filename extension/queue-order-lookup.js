@@ -372,8 +372,9 @@
   }
 
   function resolveCustomerEmail(ticket) {
-    const label = Array.from(ticket.querySelectorAll("label"))
-      .find((el) => el.textContent.trim() === "客户ID");
+    // queue-spam.js may have appended buttons inside the label and marked it.
+    const label = ticket.querySelector("label[data-ec-cid-label]") ||
+      Array.from(ticket.querySelectorAll("label")).find((el) => /^(客户ID|Customer ID)[:：]?$/i.test(el.textContent.trim()));
     const raw = (
       label?.nextElementSibling?.getAttribute("title") ||
       label?.nextElementSibling?.textContent || ""
@@ -413,6 +414,8 @@
       try {
         const rows = await searchOrders(origin, email);
         renderOrderResult(ticket, rows);
+        // queue-spam.js treats customers with orders as never-spam.
+        ticket.dispatchEvent(new CustomEvent("ec:orders", { bubbles: true, detail: { count: rows.length } }));
       } catch (_) {
         const cell = ticket.querySelector(".ec-order-row td");
         if (cell) cell.innerHTML = "";

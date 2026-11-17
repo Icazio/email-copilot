@@ -4,8 +4,12 @@ const path = require("path");
 const { URL } = require("url");
 const { loadTemplates, readJsonBody, sendJson, sendText } = require("./lib/helpers");
 const { analyzeThreadMock, extractFieldsMock, generateDraftMock, refineDraftMock, chatMock } = require("./lib/mock-engine");
-const { analyzeThreadDeepSeek, generateDraftDeepSeek, refineDraftDeepSeek, chatDeepSeek } = require("./lib/deepseek-engine");
-const { analyzeThreadOpenAI, generateDraftOpenAI, refineDraftOpenAI, chatOpenAI } = require("./lib/openai-engine");
+const { callDeepSeekChat, analyzeThreadDeepSeek, generateDraftDeepSeek, refineDraftDeepSeek, chatDeepSeek } = require("./lib/deepseek-engine");
+const { callResponsesAPI, analyzeThreadOpenAI, generateDraftOpenAI, refineDraftOpenAI, chatOpenAI } = require("./lib/openai-engine");
+const { createSpamLists } = require("./lib/spam-lists");
+const { createSpamClassifier } = require("./lib/spam-classifier");
+const { handleSpamRoute } = require("./lib/spam-routes");
+const { handleRecordRoute } = require("./lib/record-routes");
 
 function loadDotEnv() {
   const envPath = path.resolve(__dirname, "../.env");
@@ -62,6 +66,12 @@ const CONFIGURED_PROVIDERS = {
 const PROVIDER = resolveProvider();
 const MODEL = resolveModel(PROVIDER);
 const templates = loadTemplates();
+const spamLists = createSpamLists();
+const spamClassifier = createSpamClassifier({
+  provider: PROVIDER,
+  model: MODEL,
+  callModel: PROVIDER === "deepseek" ? callDeepSeekChat : PROVIDER === "openai" ? callResponsesAPI : null
+});
 
 function resolveProvider() {
   const preferred = REQUESTED_PROVIDER;
@@ -107,6 +117,18 @@ function applyCors(res) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+// Chat must not silently fall back to the mock engine: a template reply in the
+// middle of a conversation looks like a real (bad) answer. Surface the error instead.
+function chatError(err) {
+  if (err && err.code === "DEEPSEEK_INCOMPLETE_RESPONSE") return err;
+  const status = err && (err.status === 429 || err.status === 503) ? err.status : 502;
+  const reason = status === 429 ? "请求太频繁" : status === 503 ? "服务繁忙" : (err && err.message) || "未知错误";
+  const wrapped = new Error(`AI 服务调用失败（${reason}），请稍后重试。`);
+  wrapped.code = "CHAT_PROVIDER_FAILED";
+  wrapped.status = status;
+  return wrapped;
+}
+
 function timestamp() {
   return new Date().toISOString().replace("T", " ").slice(0, 19);
 }
@@ -139,6 +161,14 @@ async function routeRequest(req, res) {
       requestedProvider: REQUESTED_PROVIDER,
       configuredProviders: CONFIGURED_PROVIDERS
     });
+    return;
+  }
+
+  if (await handleSpamRoute(req, res, requestUrl.pathname, { lists: spamLists, classifier: spamClassifier, log })) {
+    return;
+  }
+
+  if (await handleRecordRoute(req, res, requestUrl, { log })) {
     return;
   }
 
@@ -225,11 +255,9 @@ async function routeRequest(req, res) {
     let usedEngine = PROVIDER;
     const result =
       PROVIDER === "deepseek"
-        ? await chatDeepSeek({ model: MODEL, body })
-            .catch((err) => { usedEngine = "mock(fallback:" + err.message.slice(0, 40) + ")"; return chatMock(body); })
+        ? await chatDeepSeek({ model: MODEL, body }).catch((err) => { throw chatError(err); })
         : PROVIDER === "openai"
-          ? await chatOpenAI({ model: MODEL, body })
-              .catch((err) => { usedEngine = "mock(fallback:" + err.message.slice(0, 40) + ")"; return chatMock(body); })
+          ? await chatOpenAI({ model: MODEL, body }).catch((err) => { throw chatError(err); })
           : chatMock(body);
     log("POST /chat", {
       engine: usedEngine,
@@ -249,8 +277,10 @@ const server = http.createServer(async (req, res) => {
     await routeRequest(req, res);
   } catch (error) {
     console.error(`[${timestamp()}] ERROR`, error instanceof Error ? error.message : String(error));
-    sendJson(res, 500, {
-      error: "Internal server error",
+    sendJson(res, error.status || 500, {
+      error: error.code === "DEEPSEEK_INCOMPLETE_RESPONSE" || error.code === "CHAT_PROVIDER_FAILED"
+        ? error.message
+        : "Internal server error",
       detail: error instanceof Error ? error.message : String(error)
     });
   }

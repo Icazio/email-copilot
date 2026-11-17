@@ -255,6 +255,7 @@ async function chatOpenAI({ model, body }) {
 }
 
 module.exports = {
+  callResponsesAPI,
   analyzeThreadOpenAI,
   generateDraftOpenAI,
   refineDraftOpenAI,

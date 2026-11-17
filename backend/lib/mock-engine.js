@@ -507,6 +507,7 @@ function chatMock({ messages = [], thread_context = {}, order_context = "" } = {
 }
 
 module.exports = {
+  extractFreeCredit,
   analyzeThreadMock,
   extractFieldsMock,
   generateDraftMock,

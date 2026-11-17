@@ -169,7 +169,7 @@ function extractEmailsFromText(text) {
 
   function collectCustomerIdFromSidebar() {
     const label = Array.from(document.querySelectorAll("label")).find(
-      (el) => cleanText(el.textContent) === "客户ID:"
+      (el) => /^(客户ID|Customer ID)\s*[:：]?$/i.test(cleanText(el.textContent))
     );
     return cleanText(label?.nextElementSibling?.querySelector("a")?.textContent || "");
   }
@@ -254,7 +254,12 @@ function extractEmailsFromText(text) {
     }
 
     source.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
-    source.querySelectorAll("p, div, li, ul, ol, h1, h2, h3, h4, h5, h6").forEach((node) => {
+    source.querySelectorAll("hr").forEach((node) => node.replaceWith("\n"));
+    // Table-based emails (Paddle, receipts) put each line in its own cell/row.
+    source.querySelectorAll("td, th").forEach((node) => node.append(" "));
+    source.querySelectorAll(
+      "p, div, li, ul, ol, h1, h2, h3, h4, h5, h6, tr, table, blockquote, pre, section, article, header, footer"
+    ).forEach((node) => {
       if (node.lastChild?.nodeType !== Node.TEXT_NODE || !String(node.textContent || "").endsWith("\n")) {
         node.append("\n");
       }
@@ -328,9 +333,18 @@ function extractEmailsFromText(text) {
       /^to:\s/i,
       /^subject:\s/i,
       /^>+\s?/,
-      /^={3,}$/,
-      /^-{3,}$/
+      /^-{2,}\s*original message\s*-{2,}$/i
     ];
+    // A bare "=====" / "-----" line is only a quote boundary when an email
+    // header follows it; otherwise it is a content separator (e.g. Paddle
+    // forwards put the buyer's chat transcript below "==============").
+    const separatorPattern = /^(?:={3,}|-{3,})$/;
+    const quoteHeaderPattern = /^(?:from|sent|to|subject|date):\s/i;
+    const isQuoteSeparator = (index) => {
+      if (!separatorPattern.test(cleanText(lines[index]))) return false;
+      const following = lines.slice(index + 1).map((line) => cleanText(line)).filter(Boolean).slice(0, 3);
+      return following.some((line) => quoteHeaderPattern.test(line));
+    };
 
     let bestCutIndex = lines.length;
 
@@ -358,7 +372,7 @@ function extractEmailsFromText(text) {
           continue;
         }
 
-        if (genericQuotePatterns.some((pattern) => pattern.test(trimmed))) {
+        if (genericQuotePatterns.some((pattern) => pattern.test(trimmed)) || isQuoteSeparator(index)) {
           bestCutIndex = index;
           break;
         }
@@ -369,7 +383,32 @@ function extractEmailsFromText(text) {
     return deduped || normalizedText || text;
   }
 
+  // Znuny answers some article-content requests (e.g. right after the ticket
+  // opens) with a full error page ("An Error Occurred / No such article!").
+  // That page must never be treated as the email body.
+  function isZnunyErrorPage(htmlText) {
+    const text = String(htmlText || "");
+    if (/class=["'][^"']*\bArticleBody\b/i.test(text)) return false;
+    // Only Znuny's own error-screen markers — a customer email may legitimately
+    // contain words like "An Error Occurred".
+    if (/Backend ERROR: OTRS-CGI|Kernel::Modules::AgentTicketArticleContent/.test(text)) return true;
+    return /No such article!/.test(text) && /Core\.Init\.ExecuteInit|Powered by[\s\S]{0,40}OTRS|Znuny/i.test(text);
+  }
+
   async function fetchArticleBodies(rows) {
+    const first = await fetchArticleBodiesOnce(rows);
+    const failed = first.filter((item) => !item.ok);
+    if (!failed.length) return first;
+
+    // Retry failed articles once after a short wait; the article iframes may
+    // have finished loading by then, giving us their real content URLs.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const retryRows = rows.filter((row) => failed.some((item) => item.article_id === row.article_id));
+    const retried = await fetchArticleBodiesOnce(retryRows);
+    return first.map((item) => (item.ok ? item : retried.find((r) => r.article_id === item.article_id) || item));
+  }
+
+  async function fetchArticleBodiesOnce(rows) {
     const ticketId = getTicketId();
     const iframeUrlMap = getIframeUrlMap();
     const candidates = rows.filter((row) => row.article_id).slice(0, 30);
@@ -401,6 +440,15 @@ function extractEmailsFromText(text) {
           }
 
           const htmlText = await response.text();
+          if (isZnunyErrorPage(htmlText)) {
+            return {
+              article_id: row.article_id,
+              body: "",
+              fetch_url: url,
+              ok: false,
+              error: "znuny-error-page"
+            };
+          }
           return {
             article_id: row.article_id,
             body: parseArticleBodyFromHtml(htmlText),
@@ -445,11 +493,13 @@ function extractEmailsFromText(text) {
         const body = displayBodyMap.get(row.article_id) || "";
         const lines = [];
 
-        if (row.sender) {
-          lines.push(`From: ${row.sender}`);
-        }
+        const role = row.direction === "outgoing" ? "[Our team]" : "[Customer]";
+        lines.push(row.sender ? `${role} From: ${row.sender}` : role);
         if (row.created) {
           lines.push(`Date: ${row.created}`);
+        }
+        if (Array.isArray(row.attachments) && row.attachments.length) {
+          lines.push(`Attachments: ${row.attachments.join(", ")}`);
         }
         if (body) {
           lines.push("");
@@ -474,6 +524,13 @@ function extractEmailsFromText(text) {
     const pageEmailCandidates = collectPageEmailCandidates();
     const readableThreadText = buildReadableZnunyThread(rows, fetchedBodies);
     const fetchedBodyCount = fetchedBodies.filter((item) => item.body).length;
+    // Some articles never have an HTML body (plain-text mails, system notices,
+    // empty notes) and always "fail". Only the newest customer message is
+    // essential for a draft, so report it separately.
+    const failedIds = fetchedBodies.filter((item) => !item.ok).map((item) => item.article_id);
+    const latestIncoming = rows
+      .filter((row) => row.direction !== "outgoing" && row.article_id)
+      .sort((a, b) => Number(b.number || 0) - Number(a.number || 0))[0];
     const activeArticleBody = fetchedBodies.find((item) => item.body)?.body || "";
 
     return {
@@ -483,6 +540,9 @@ function extractEmailsFromText(text) {
       rowCount: rows.length,
       visiblePanelCount: 0,
       iframeBodyCount: fetchedBodyCount,
+      failedBodyCount: failedIds.length,
+      failedArticleIds: failedIds,
+      latestIncomingFailed: Boolean(latestIncoming && failedIds.includes(latestIncoming.article_id)),
       articleBodyLength: activeArticleBody.length,
       rows,
       structured: {
@@ -574,6 +634,9 @@ function extractEmailsFromText(text) {
       znuny_row_count: threadResult.rowCount || 0,
       znuny_visible_panel_count: threadResult.visiblePanelCount || 0,
       znuny_iframe_body_count: threadResult.iframeBodyCount || 0,
+      znuny_failed_body_count: threadResult.failedBodyCount || 0,
+      znuny_failed_article_ids: threadResult.failedArticleIds || [],
+      znuny_latest_incoming_failed: Boolean(threadResult.latestIncomingFailed),
       znuny_article_body_length: threadResult.articleBodyLength || 0,
       znuny_iframe_ids: (threadResult.structured?.iframe_articles || [])
         .slice(0, 10)
@@ -583,309 +646,7 @@ function extractEmailsFromText(text) {
     };
   }
 
-  // --- Queue-page spam flagging ---
-
-  const BLOCKLIST_KEY = "ec-blocked-senders";
-
-  function loadBlocklist() {
-    try {
-      return new Set(JSON.parse(localStorage.getItem(BLOCKLIST_KEY) || "[]"));
-    } catch (_) {
-      return new Set();
-    }
-  }
-
-  function saveBlocklist(set) {
-    try {
-      localStorage.setItem(BLOCKLIST_KEY, JSON.stringify([...set]));
-    } catch (_) {}
-  }
-
-  function blockSender(email) {
-    if (!email) return;
-    const list = loadBlocklist();
-    list.add(email.toLowerCase().trim());
-    saveBlocklist(list);
-  }
-
-  function isSenderBlocked(email) {
-    if (!email) return false;
-    return loadBlocklist().has(email.toLowerCase().trim());
-  }
-
-  const SPAM_THRESHOLD = 3;
-
-  const SPAM_RULES = [
-    // --- 发件人信号 ---
-    { field: "sender", pattern: /newsletter@|noreply@|no-reply@|mailer@|bulk@/i, score: 3 },
-    { field: "sender", pattern: /@[^@]*(newsletter|promo|marketing|deals)/i,     score: 2 },
-
-    // --- 主题：外链/SEO 推销（强信号）---
-    { field: "subject", pattern: /\bguest\s*post/i,                               score: 3 },
-    { field: "subject", pattern: /\bdo[\s-]?follow\s*(link|back)?/i,              score: 3 },
-    { field: "subject", pattern: /\blink[\s-]?build/i,                            score: 3 },
-    { field: "subject", pattern: /\barticle\s*submission/i,                       score: 3 },
-    { field: "subject", pattern: /\bpermanent\s*(do[\s-]?follow|post)\b/i,        score: 3 },
-    { field: "subject", pattern: /\bdr\s*\d+\+?\s*(guest|post)/i,                 score: 3 },
-
-    // --- 主题：促销 / 营销（中等信号）---
-    { field: "subject", pattern: /\bshop\s*now\b/i,                               score: 2 },
-    { field: "subject", pattern: /\bhuge\s*savings\b/i,                           score: 2 },
-    { field: "subject", pattern: /\bspecial\s*(rates?|deals?|offers?|discount)/i, score: 2 },
-    { field: "subject", pattern: /\bquality\s*websites?\b/i,                      score: 2 },
-    { field: "subject", pattern: /\b(seo|backlinks?)\b/i,                         score: 2 },
-    { field: "subject", pattern: /\boff[\s-]?page\b/i,                            score: 2 },
-    { field: "subject", pattern: /\bpromote\s+(your\s+)?website\b/i,              score: 3 },
-    { field: "subject", pattern: /\bhigh\s+(da|domain\s*authority)\b/i,           score: 3 },
-    { field: "subject", pattern: /\bpress\s+release\b/i,                          score: 3 },
-    { field: "subject", pattern: /\bcollaboration\s+(opportunity|oportunity)\b/i, score: 3 },
-    { field: "subject", pattern: /\bfeatured\s+on\b/i,                            score: 3 },
-    { field: "subject", pattern: /\bhigh\s+authority\s+placement\b/i,             score: 3 },
-    { field: "subject", pattern: /\bpartner\s*request\b/i,                        score: 2 },
-
-    // --- 主题：系统通知（非客户邮件）---
-    { field: "subject", pattern: /\bmessage\s+\S+\s+delayed\b/i,                  score: 3 },
-
-    // --- 正文结构特征 ---
-    { field: "subject", pattern: /\bunsubscribe\b/i,                              score: 3 },
-    { field: "subject", pattern: /\bfeatured\s+listings?\b/i,                     score: 2 },
-    { field: "subject", pattern: /\bgreater\s+exposure\b/i,                       score: 2 },
-
-    // --- 文本风格（弱信号，需叠加）---
-    { field: "style", test: (s) => (s.match(/\b[A-Z]{3,}\b/g) || []).length >= 2, score: 1 },
-    { field: "style", test: (s) => (s.match(/!/g) || []).length >= 2,             score: 1 },
-  ];
-
-  function isQueuePage() {
-    return document.querySelector("li.MasterAction") !== null;
-  }
-
-  function injectSpamStyles() {
-    if (document.getElementById("ec-spam-styles")) return;
-    const style = document.createElement("style");
-    style.id = "ec-spam-styles";
-    style.textContent = `
-      .ec-spam-badge {
-        display: inline-block;
-        margin-right: 7px;
-        padding: 1px 7px;
-        background: #ef4444;
-        color: #fff;
-        font-size: 11px;
-        font-weight: 700;
-        letter-spacing: 0.06em;
-        border-radius: 3px;
-        vertical-align: middle;
-        pointer-events: none;
-      }
-      .ec-blocked-badge {
-        background: #7c3aed;
-      }
-      .ec-block-btn {
-        display: inline-block;
-        margin-left: 5px;
-        padding: 1px 6px;
-        background: transparent;
-        color: #ef4444;
-        border: 1px solid #ef4444;
-        font-size: 10px;
-        font-weight: 600;
-        border-radius: 3px;
-        cursor: pointer;
-        vertical-align: middle;
-        line-height: 1.4;
-      }
-      .ec-block-btn:hover {
-        background: #ef4444;
-        color: #fff;
-      }
-      .ec-unblock-btn {
-        display: inline-block;
-        margin-left: 5px;
-        padding: 1px 6px;
-        background: transparent;
-        color: #7c3aed;
-        border: 1px solid #7c3aed;
-        font-size: 10px;
-        font-weight: 600;
-        border-radius: 3px;
-        cursor: pointer;
-        line-height: 1.4;
-      }
-      .ec-unblock-btn:hover {
-        background: #7c3aed;
-        color: #fff;
-      }
-      li.MasterAction.ec-spam {
-        opacity: 0.5;
-      }
-      #ec-select-btn {
-        position: fixed;
-        bottom: 24px;
-        right: 24px;
-        z-index: 99999;
-        padding: 8px 14px;
-        background: #ef4444;
-        color: #fff;
-        font-size: 13px;
-        font-weight: 600;
-        border: none;
-        border-radius: 6px;
-        cursor: pointer;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.25);
-        transition: background 0.15s;
-      }
-      #ec-select-btn:hover { background: #dc2626; }
-      #ec-select-btn:disabled {
-        background: #9ca3af;
-        cursor: default;
-      }
-    `;
-    document.head.appendChild(style);
-  }
-
-  function countSpamTickets() {
-    return document.querySelectorAll("li.MasterAction.ec-spam").length;
-  }
-
-  function updateSelectButton() {
-    const btn = document.getElementById("ec-select-btn");
-    if (!btn) return;
-    const n = countSpamTickets();
-    btn.textContent = n > 0 ? `选中垃圾邮件 (${n})` : "无垃圾邮件";
-    btn.disabled = n === 0;
-  }
-
-  function getSenderEmail(ticket) {
-    const labels = ticket.querySelectorAll("label");
-    for (const label of labels) {
-      if (label.textContent.trim() === "客户ID") {
-        const div = label.nextElementSibling;
-        return (div?.getAttribute("title") || div?.textContent || "").trim();
-      }
-    }
-    return "";
-  }
-
-  function spamScore(subject, sender) {
-    let total = 0;
-    for (const rule of SPAM_RULES) {
-      if (rule.field === "subject" && rule.pattern.test(subject)) total += rule.score;
-      else if (rule.field === "sender" && rule.pattern.test(sender))  total += rule.score;
-      else if (rule.field === "style"  && rule.test(subject))         total += rule.score;
-    }
-    return total;
-  }
-
-  function getCustomerIdLabel(ticket) {
-    return Array.from(ticket.querySelectorAll("label")).find(
-      (el) => el.textContent.trim() === "客户ID"
-    ) || null;
-  }
-
-  function applyBlockButton(ticket, sender) {
-    if (!sender || ticket.querySelector(".ec-block-btn")) return;
-    const label = getCustomerIdLabel(ticket);
-    if (!label) return;
-    const btn = document.createElement("button");
-    btn.className = "ec-block-btn";
-    btn.textContent = "Block sender";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      blockSender(sender);
-      const badge = ticket.querySelector(".ec-spam-badge");
-      if (badge) {
-        badge.textContent = "BLOCKED";
-        badge.classList.add("ec-blocked-badge");
-      }
-      btn.remove();
-      applyUnblockButton(ticket, sender);
-      updateSelectButton();
-    });
-    label.appendChild(btn);
-  }
-
-  function applyUnblockButton(ticket, sender) {
-    if (!sender || ticket.querySelector(".ec-unblock-btn")) return;
-    const label = getCustomerIdLabel(ticket);
-    if (!label) return;
-    const btn = document.createElement("button");
-    btn.className = "ec-unblock-btn";
-    btn.textContent = "Unblock";
-    btn.addEventListener("click", (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const list = loadBlocklist();
-      list.delete(sender.toLowerCase().trim());
-      saveBlocklist(list);
-      const badge = ticket.querySelector(".ec-spam-badge");
-      if (badge) badge.remove();
-      ticket.classList.remove("ec-spam");
-      ticket.removeAttribute("data-ec-score");
-      btn.remove();
-      updateSelectButton();
-    });
-    label.appendChild(btn);
-  }
-
-  function flagSpamTickets() {
-    document.querySelectorAll("li.MasterAction:not([data-ec-checked])").forEach((ticket) => {
-      ticket.setAttribute("data-ec-checked", "1");
-      const link = ticket.querySelector("a.MasterActionLink");
-      if (!link) return;
-      const ticketSubject  = link.getAttribute("title") || link.textContent || "";
-      const previewSubject = ticket.querySelector("div.Preview span.Subject")?.textContent || "";
-      const bodyPreview    = ticket.querySelector("div.Preview .Content.ArticleBody")?.innerText || "";
-      const subject = ticketSubject + " " + previewSubject + " " + bodyPreview;
-      const sender  = getSenderEmail(ticket);
-      const blocked = isSenderBlocked(sender);
-      const score   = blocked ? 99 : spamScore(subject, sender);
-      if (score < SPAM_THRESHOLD) return;
-      ticket.classList.add("ec-spam");
-      ticket.setAttribute("data-ec-score", score);
-      if (!ticket.querySelector(".ec-spam-badge")) {
-        const badge = document.createElement("span");
-        badge.className = blocked ? "ec-spam-badge ec-blocked-badge" : "ec-spam-badge";
-        badge.textContent = blocked ? "BLOCKED" : "SPAM";
-        if (link) link.insertBefore(badge, link.firstChild);
-      }
-      if (blocked) applyUnblockButton(ticket, sender);
-      else applyBlockButton(ticket, sender);
-    });
-    updateSelectButton();
-  }
-
-  function injectSelectButton() {
-    if (document.getElementById("ec-select-btn")) return;
-    const btn = document.createElement("button");
-    btn.id = "ec-select-btn";
-    btn.textContent = "选中垃圾邮件 (0)";
-    btn.disabled = true;
-    btn.addEventListener("click", () => {
-      document.querySelectorAll("li.MasterAction.ec-spam input.Checkbox[type='checkbox']").forEach((cb) => {
-        if (!cb.checked) cb.click();
-      });
-    });
-    document.body.appendChild(btn);
-  }
-
-  function initQueueSpamFlags() {
-    if (!isQueuePage()) return;
-    injectSpamStyles();
-    injectSelectButton();
-    flagSpamTickets();
-    const container = document.querySelector("ul#TicketOverviewPreview, #ContentColumn ul, .Overview ul");
-    if (container) {
-      new MutationObserver(flagSpamTickets).observe(container, { childList: true, subtree: false });
-    }
-  }
-
-  if (document.readyState === "loading") {
-    document.addEventListener("DOMContentLoaded", initQueueSpamFlags);
-  } else {
-    initQueueSpamFlags();
-  }
+  // Queue-page spam flagging lives in queue-spam.js.
 
   // --- Message listener (ticket zoom extraction) ---
 

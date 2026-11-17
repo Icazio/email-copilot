@@ -21,7 +21,8 @@ const elements = {
   copyTicketBtn: document.getElementById("copyTicketBtn"),
   copyEmailBtn: document.getElementById("copyEmailBtn"),
   debugInfo: document.getElementById("debugInfo"),
-  status: document.getElementById("status")
+  status: document.getElementById("status"),
+  autoDraftToggle: document.getElementById("autoDraftToggle")
 };
 
 let lastThreadStructured = null;
@@ -29,6 +30,12 @@ let orderSearchContextPromise = null;
 let activeOperation = null;
 let autoOrderSearchEnabled = true;
 const chatHistory = [];
+
+// Auto-draft: the Znuny ticket currently shown in the panel, and saved panel
+// state per ticket so switching back and forth keeps each conversation.
+let currentTicketId = null;
+const ticketStates = new Map();
+const AUTO_DRAFT_PROMPT = "帮我写一封英文回复邮件。";
 
 const DEFAULTS = {
   backendUrl: "http://localhost:8787",
@@ -116,8 +123,11 @@ async function loadSettings() {
     "backendUrl",
     "subjectSelectors",
     "threadSelectors",
-    "messageSelectors"
+    "messageSelectors",
+    "autoDraft"
   ]);
+
+  if (elements.autoDraftToggle) elements.autoDraftToggle.checked = stored.autoDraft !== false;
 
   elements.backendUrl.value = stored.backendUrl || DEFAULTS.backendUrl;
   elements.subjectSelectors.value = stored.subjectSelectors || DEFAULTS.subjectSelectors;
@@ -226,7 +236,20 @@ async function captureThread() {
     if (detectedEmail) {
       elements.customerEmailInput.value = detectedEmail;
     }
+
+    return response;
   });
+}
+
+function failedBodyCount(response) {
+  return Number(response?.debug?.znuny_failed_body_count || 0);
+}
+
+function warnIfIncomplete(response) {
+  const failed = failedBodyCount(response);
+  if (failed > 0) {
+    showStatusBanner(`有 ${failed} 封邮件内容没加载出来，草稿可能不完整。请稍后再点 Capture。`);
+  }
 }
 
 async function autoSearchOrdersAfterCapture() {
@@ -625,7 +648,7 @@ function buildRawOrderEntry(row) {
 function parseOrderRowsFromDetailBlocks(detailBlocks, customerEmail) {
   const emailPattern = escapeRegExp(customerEmail);
   const headerRegex = new RegExp(
-    `^(?:(.+?)\\s+)?<${emailPattern}>\\s+([A-Z]{2})\\s+\\[([^\\]]+)\\]\\s*$`,
+    `^(?:(.+?)\\s+)?<${emailPattern}>\\s*(?:([A-Z]{2})\\s+)?\\[([^\\]]+)\\]\\s*$`,
     "i"
   );
 
@@ -642,10 +665,16 @@ function parseOrderRowsFromDetailBlocks(detailBlocks, customerEmail) {
       if (!headerMatch) continue;
 
       const customer = (headerMatch[1] || "").trim();
-      const country = headerMatch[2];
+      const country = headerMatch[2] || "";
       const product = headerMatch[3];
       const dataLine = lines[i + 1] || "";
-      const parts = dataLine.split(/\s+-\s+/).map((p) => p.trim());
+      // License key may be empty ("82765308 - - USD56.83"), so match fields by position.
+      const detail = dataLine.match(
+        /^(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)\s*-\s*(\S+)\s*-\s*(\S*)\s*-\s*(.*?)\s*-\s*([A-Z]{3}\s?[\d.,]+)\s*-\s*([A-Z_]+)\s*$/
+      );
+      const parts = detail
+        ? detail.slice(1).map((p) => (p === "-" ? "" : p.trim()))
+        : dataLine.split(/\s+-\s+/).map((p) => p.trim());
 
       const row = {
         Customer: customer,
@@ -674,6 +703,7 @@ function parseOrderRowsFromDetailBlocks(detailBlocks, customerEmail) {
 }
 
 function renderOrderResults(rows, customerEmail) {
+  window.ecLastOrderRows = Array.isArray(rows) ? rows : []; // read by panel-actions.js (退款记录)
   const display = elements.orderResultsDisplay;
   const textarea = elements.manualLookup;
   const toggle = elements.lookupToggleBtn;
@@ -929,7 +959,12 @@ async function postJson(path, payload) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`${response.status} ${text}`);
+    let message = `${response.status} ${text}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.error && parsed.error !== "Internal server error") message = parsed.error;
+    } catch (_e) { /* keep raw text */ }
+    throw new Error(message);
   }
 
   return response.json();
@@ -976,30 +1011,74 @@ function renderMarkdown(raw) {
   return out.join("");
 }
 
+// Drafts may end with "---NOTES---" + short notes for the agent. Older-style
+// replies used "---" followed by "给客服的说明". Split so Copy takes only the email.
+// Drafts may also carry "---ZH---" + a Chinese translation of the email.
+// Both extra sections are shown separately and excluded from Copy.
+function splitDraftAndNotes(content) {
+  const text = String(content || "");
+  const markers = [
+    { key: "zh", re: /\n?[ \t]*-{3}\s*ZH\s*-{3}[ \t]*\n?/i },
+    { key: "notes", re: /\n?[ \t]*-{3}\s*NOTES\s*-{3}[ \t]*\n?|\n\s*-{3,}\s*\n+\s*(?=给客服的说明)/i }
+  ]
+    .map(({ key, re }) => {
+      const m = text.match(re);
+      return m ? { key, start: m.index, end: m.index + m[0].length } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+
+  const result = { main: text, zh: "", notes: "" };
+  if (!markers.length) return result;
+  result.main = text.slice(0, markers[0].start).trimEnd();
+  markers.forEach((m, i) => {
+    const next = markers[i + 1];
+    result[m.key] = text.slice(m.end, next ? next.start : text.length).trim();
+  });
+  return result;
+}
+
 function appendChatMessage(role, content) {
   const wrap = document.createElement("div");
   wrap.className = `chat-message chat-message-${role}`;
+  const { main, zh, notes } = role === "assistant" ? splitDraftAndNotes(content) : { main: content, zh: "", notes: "" };
 
   const bubble = document.createElement("div");
   bubble.className = "chat-bubble";
   if (role === "assistant") {
-    bubble.innerHTML = renderMarkdown(content);
+    bubble.innerHTML = renderMarkdown(main);
   } else {
     bubble.textContent = content;
   }
   wrap.appendChild(bubble);
 
+  if (zh) {
+    const zhEl = document.createElement("div");
+    zhEl.className = "chat-translation";
+    zhEl.textContent = zh;
+    wrap.appendChild(zhEl);
+  }
+
+  if (notes) {
+    const notesEl = document.createElement("div");
+    notesEl.className = "chat-notes";
+    notesEl.innerHTML = renderMarkdown(notes);
+    wrap.appendChild(notesEl);
+  }
+
   if (role === "assistant") {
     const copyBtn = document.createElement("button");
     copyBtn.className = "chat-copy-btn";
     copyBtn.textContent = "Copy";
+    copyBtn.title = zh || notes ? "只复制英文邮件（不含中文翻译和备注）" : "Copy";
     copyBtn.addEventListener("click", () => {
-      navigator.clipboard.writeText(content).then(() => {
+      navigator.clipboard.writeText(main).then(() => {
         copyBtn.textContent = "✓";
         setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
       });
     });
     wrap.appendChild(copyBtn);
+    wrap.dataset.draft = main; // read by panel-actions.js ("填入回复框")
   }
 
   elements.chatMessages.appendChild(wrap);
@@ -1032,6 +1111,7 @@ async function sendChatMessage(userText) {
   const thinkingEl = appendChatThinking();
   elements.chatSendBtn.disabled = true;
   setStatus("thinking…");
+  const ticketAtStart = currentTicketId;
 
   try {
     const data = await postJson("/chat", {
@@ -1046,12 +1126,24 @@ async function sendChatMessage(userText) {
 
     thinkingEl.remove();
     const reply = data.reply || "(no response)";
+    if (ticketAtStart !== currentTicketId) {
+      // The agent switched tickets while we waited: file the reply under its own ticket.
+      ticketStates.get(ticketAtStart)?.history.push({ role: "assistant", content: reply });
+      return;
+    }
     chatHistory.push({ role: "assistant", content: reply });
     appendChatMessage("assistant", reply);
     setStatus("ready");
   } catch (error) {
     thinkingEl.remove();
-    appendChatMessage("assistant", `Error: ${error.message}`);
+    if (ticketAtStart !== currentTicketId) {
+      const saved = ticketStates.get(ticketAtStart);
+      if (saved && saved.history[saved.history.length - 1]?.content === text) saved.history.pop();
+      return;
+    }
+    // Drop the unanswered turn so re-sending doesn't duplicate it in the history.
+    if (chatHistory[chatHistory.length - 1]?.content === text) chatHistory.pop();
+    appendChatMessage("assistant", `⚠️ ${error.message}`);
     setStatus("error");
   } finally {
     elements.chatSendBtn.disabled = false;
@@ -1059,6 +1151,7 @@ async function sendChatMessage(userText) {
 }
 
 function clearPanel() {
+  if (currentTicketId) ticketStates.delete(currentTicketId);
   lastThreadStructured = null;
   orderSearchContextPromise = null;
   chatHistory.length = 0;
@@ -1134,8 +1227,7 @@ function addRipple(btn) {
 }
 addRipple(elements.captureBtn);
 addRipple(elements.chatSendBtn);
-
-loadSettings().catch(console.error);
+// Settings are loaded at the end of this file, before the first auto-draft.
 
 elements.lookupToggleBtn.addEventListener("click", () => {
   const showing = elements.orderResultsDisplay.style.display !== "none";
@@ -1168,7 +1260,7 @@ elements.orderResultsDisplay.addEventListener("click", (e) => {
 
 elements.captureBtn.addEventListener("click", () => {
   captureThread()
-    .then(() => autoSearchOrdersAfterCapture())
+    .then((response) => { warnIfIncomplete(response); return autoSearchOrdersAfterCapture(); })
     .catch(handleCaptureError);
 });
 
@@ -1218,3 +1310,165 @@ elements.chatQuickActions.addEventListener("click", (e) => {
     sendChatMessage(chip.dataset.msg || chip.textContent);
   }
 });
+
+// ── Auto-draft on ticket open ────────────────────────────────────────────────
+// When the agent opens (or switches to) a Znuny ticket, capture the thread,
+// look up orders, and request a draft — so the agent only reviews and edits.
+
+function ticketIdFromUrl(url) {
+  const text = String(url || "");
+  if (!/Action=AgentTicketZoom/i.test(text)) return null;
+  const match = text.match(/[;&?]TicketID=(\d+)/i);
+  return match ? match[1] : null;
+}
+
+function isAutoDraftEnabled() {
+  return elements.autoDraftToggle ? elements.autoDraftToggle.checked : true;
+}
+
+function saveCurrentTicketState() {
+  if (!currentTicketId) return;
+  // Only keep tickets that have a conversation; anything half-done is redone on return.
+  if (!chatHistory.length) {
+    ticketStates.delete(currentTicketId);
+    return;
+  }
+  ticketStates.set(currentTicketId, {
+    subject: elements.subject.value,
+    threadText: elements.threadText.value,
+    structured: lastThreadStructured,
+    customerEmail: elements.customerEmailInput.value,
+    lookup: elements.manualLookup.value,
+    lookupDisplay: elements.manualLookup.style.display,
+    ordersHtml: elements.orderResultsDisplay.innerHTML,
+    ordersDisplay: elements.orderResultsDisplay.style.display,
+    toggleDisplay: elements.lookupToggleBtn ? elements.lookupToggleBtn.style.display : "",
+    history: chatHistory.slice()
+  });
+}
+
+function restoreTicketState(state) {
+  elements.subject.value = state.subject;
+  elements.threadText.value = state.threadText;
+  lastThreadStructured = state.structured;
+  elements.customerEmailInput.value = state.customerEmail;
+  elements.manualLookup.value = state.lookup;
+  elements.manualLookup.style.display = state.lookupDisplay;
+  elements.orderResultsDisplay.innerHTML = state.ordersHtml;
+  elements.orderResultsDisplay.style.display = state.ordersDisplay;
+  if (elements.lookupToggleBtn) elements.lookupToggleBtn.style.display = state.toggleDisplay;
+
+  chatHistory.length = 0;
+  chatHistory.push(...state.history);
+  elements.chatMessages.innerHTML = "";
+  chatHistory.forEach((m) => appendChatMessage(m.role, m.content));
+  elements.chatQuickActions.style.display = chatHistory.length ? "none" : "";
+  setStatus("restored");
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntilIdle(timeoutMs = 60000) {
+  const started = Date.now();
+  while (activeOperation && Date.now() - started < timeoutMs) {
+    await delay(300);
+  }
+  return !activeOperation;
+}
+
+async function runAutoDraft(ticketId) {
+  if (!(await waitUntilIdle()) || ticketId !== currentTicketId) return;
+
+  // The content script may not be ready right after navigation: retry once.
+  let captured;
+  try {
+    captured = await captureThread();
+  } catch (_firstError) {
+    await delay(1500);
+    if (ticketId !== currentTicketId) return;
+    captured = await captureThread();
+  }
+  if (ticketId !== currentTicketId) return;
+
+  // Some article bodies failed to load (Znuny error page right after opening):
+  // try once more. Only the newest customer message is essential — older
+  // articles without an HTML body (plain-text mails, system notices, empty
+  // notes) fail every time and must not block drafting forever.
+  if (failedBodyCount(captured) > 0) {
+    await delay(2500);
+    if (ticketId !== currentTicketId) return;
+    captured = await captureThread();
+    if (ticketId !== currentTicketId) return;
+    if (captured?.debug?.znuny_latest_incoming_failed) {
+      setStatus("auto-draft skipped: 客户最新邮件未加载");
+      showStatusBanner("客户最新一封邮件的内容没加载出来，未自动起草。请稍后再点 Capture。");
+      return;
+    }
+    warnIfIncomplete(captured);
+  }
+
+  if (!elements.threadText.value.trim()) {
+    setStatus("auto-draft skipped: empty thread");
+    return;
+  }
+
+  await autoSearchOrdersAfterCapture();
+  if (ticketId !== currentTicketId) return;
+
+  // Respect anything the agent already started typing or sending meanwhile.
+  if (chatHistory.length) return;
+  await sendChatMessage(AUTO_DRAFT_PROMPT);
+}
+
+async function handleActiveTabChange(tab) {
+  const ticketId = ticketIdFromUrl(tab?.url);
+  if (!ticketId || ticketId === currentTicketId) return;
+
+  saveCurrentTicketState();
+  currentTicketId = ticketId;
+
+  const saved = ticketStates.get(ticketId);
+  if (saved) {
+    restoreTicketState(saved);
+    return;
+  }
+
+  clearPanel();
+  if (!isAutoDraftEnabled()) {
+    setStatus("new ticket — click Capture");
+    return;
+  }
+
+  setStatus("auto-drafting…");
+  runAutoDraft(ticketId).catch((error) => {
+    if (ticketId === currentTicketId) handleCaptureError(error);
+  });
+}
+
+let panelWindowId = null;
+
+chrome.windows.getCurrent().then((win) => { panelWindowId = win.id; }).catch(() => {});
+
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  if (panelWindowId !== null && windowId !== panelWindowId) return;
+  chrome.tabs.get(tabId).then(handleActiveTabChange).catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !tab.active) return;
+  if (panelWindowId !== null && tab.windowId !== panelWindowId) return;
+  handleActiveTabChange(tab);
+});
+
+elements.autoDraftToggle?.addEventListener("change", () => {
+  chrome.storage.local.set({ autoDraft: elements.autoDraftToggle.checked }).catch(() => {});
+});
+
+// When the panel opens on a ticket that is already showing, draft for it too.
+loadSettings()
+  .catch(console.error)
+  .then(() => getActiveTab())
+  .then(handleActiveTabChange)
+  .catch(() => {});

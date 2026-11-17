@@ -902,6 +902,62 @@ pre:empty::before {
   border-bottom-left-radius: 4px;
 }
 
+.auto-draft-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  font-size: 12px;
+  color: var(--muted);
+  cursor: pointer;
+  white-space: nowrap;
+  user-select: none;
+}
+
+.auto-draft-toggle input {
+  accent-color: var(--accent2);
+  margin: 0;
+}
+
+.chat-translation {
+  margin-top: 6px;
+  padding: 7px 11px;
+  border-left: 3px solid var(--border);
+  background: var(--card);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--muted);
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.chat-translation::before {
+  content: "中文翻译（不会被复制）";
+  display: block;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
+.chat-notes {
+  margin-top: 6px;
+  padding: 7px 11px;
+  border-left: 3px solid var(--accent2);
+  background: var(--card);
+  border-radius: 6px;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted);
+  word-break: break-word;
+}
+
+.chat-notes::before {
+  content: "给客服的备注（不会被复制）";
+  display: block;
+  font-weight: 600;
+  margin-bottom: 2px;
+}
+
 .chat-bubble ul {
   margin: 4px 0 4px 16px;
   padding: 0;
@@ -990,3 +1046,19 @@ pre:empty::before {
   padding: 0 20px;
   border-radius: 10px;
 }
+
+/* ── Ticket actions (panel-actions.js) ───────────────────────────── */
+.ta-group { margin-top: 10px; display: flex; flex-direction: column; gap: 6px; }
+.ta-title { font-size: 12px; font-weight: 600; color: var(--muted); }
+.ta-row { display: flex; flex-wrap: wrap; gap: 6px; }
+.ta-hint { font-size: 11px; color: var(--muted); }
+.ta-status { margin-top: 10px; font-size: 12px; white-space: pre-wrap; }
+.ta-status.ok { color: #15803d; }
+.ta-status.err { color: #b91c1c; }
+.ta-output { max-height: 260px; overflow: auto; font-size: 11px; white-space: pre-wrap; }
+.chat-fill-btn { margin-left: 6px; }
+.ta-record { margin-top: 6px; padding: 8px; border: 1px solid var(--border); border-radius: 8px; display: flex; flex-direction: column; gap: 6px; }
+.ta-field { display: grid; grid-template-columns: 84px 1fr; gap: 6px; align-items: center; font-size: 12px; }
+.ta-field label { color: var(--muted); }
+.ta-field.unmapped label { text-decoration: line-through; }
+.ta-warn { font-size: 12px; color: #b45309; }

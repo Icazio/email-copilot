@@ -32,6 +32,10 @@
       <div class="action-bar">
         <button id="captureBtn" class="btn-primary">Capture</button>
         <button id="clearBtn" class="btn-ghost btn-clear">Clear</button>
+        <label class="auto-draft-toggle" title="打开工单时自动抓取、查订单并起草回复">
+          <input id="autoDraftToggle" type="checkbox" checked />
+          自动起草
+        </label>
       </div>
 
       <!-- Thread -->
@@ -97,6 +101,63 @@
         </div>
       </div>
 
+      <!-- Ticket actions (Znuny ticket zoom page) -->
+      <details class="card" id="ticketActionsCard">
+        <summary class="card-summary">🛠 工单操作</summary>
+        <div class="ta-hint" id="taTicketLabel">在工单详情页使用；每个操作执行前都会再确认一次。</div>
+
+        <div class="ta-group">
+          <div class="ta-title">内部备注（客户看不到）</div>
+          <input id="taNoteSubject" type="text" placeholder="备注标题（可留空）" />
+          <textarea id="taNoteBody" rows="3" placeholder="备注内容"></textarea>
+          <button id="taNoteBtn" class="btn-secondary">添加内部备注</button>
+        </div>
+
+        <div class="ta-group">
+          <div class="ta-title">按流程转交</div>
+          <div class="ta-row" id="taEscalations"></div>
+          <div class="ta-hint">转交备注默认使用「订单查询结果」框里的内容。</div>
+        </div>
+
+        <div class="ta-group">
+          <div class="ta-title">状态</div>
+          <div class="ta-row">
+            <button id="taLockBtn" class="btn-ghost-sm">锁定</button>
+            <button id="taUnlockBtn" class="btn-ghost-sm">解锁</button>
+            <button id="taCloseBtn" class="btn-ghost-sm">关闭工单（成功）</button>
+          </div>
+        </div>
+
+        <div class="ta-group">
+          <div class="ta-title">记录</div>
+          <div class="ta-row">
+            <button id="taRefundOpenBtn" class="btn-ghost-sm">记录退款（飞书）</button>
+            <button id="taCreditOpenBtn" class="btn-ghost-sm">记录积分（腾讯文档）</button>
+          </div>
+          <div id="taRecordForm" class="ta-record" style="display:none">
+            <div id="taRecordTitle" class="ta-title"></div>
+            <div id="taRecordHint" class="ta-hint"></div>
+            <div id="taRecordFields"></div>
+            <div class="ta-row">
+              <button id="taRecordSubmitBtn" class="btn-secondary">确认记录</button>
+              <button id="taRecordCancelBtn" class="btn-ghost-sm">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <details class="subtle-details">
+          <summary>检查表单字段（只读，不提交）</summary>
+          <div class="ta-row" style="margin-top:6px">
+            <button class="btn-ghost-sm ta-inspect" data-action="AgentTicketNote">备注</button>
+            <button class="btn-ghost-sm ta-inspect" data-action="AgentTicketOwner">转交</button>
+            <button class="btn-ghost-sm ta-inspect" data-action="AgentTicketClose">关闭</button>
+          </div>
+          <pre id="taInspectOut" class="ta-output"></pre>
+        </details>
+
+        <div id="taStatus" class="ta-status"></div>
+      </details>
+
       <!-- Config (collapsed) -->
       <details class="card">
         <summary class="card-summary">⚙ Config</summary>
@@ -129,5 +190,6 @@
 
     </div>
     <script src="panel.js"></script>
+    <script src="panel-actions.js"></script>
   </body>
 </html>
