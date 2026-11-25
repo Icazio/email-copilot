@@ -1,0 +1,55 @@
+{
+  "_note": "工单列表「处理类型 + 一键处理」配置。修改后无需重启后端（每次请求重新读取）。replies 里的 {name} 会在发送时替换为客户名（取不到就是 User）。",
+  "labels": {
+    "cancel_renewal": "取消续订",
+    "free_credit": "免费积分",
+    "refund": "退款",
+    "consult": "咨询",
+    "technical": "技术问题",
+    "invoice": "发票",
+    "other": "其他"
+  },
+  "case_labels": {
+    "youtube_no_screenshot": "YouTube 无截图",
+    "has_images": "有附件图",
+    "effect_unsatisfied": "效果不满意",
+    "program_issue": "程序问题",
+    "auto_renewal": "自动续订"
+  },
+  "julie": {
+    "owner": "Julie Cai",
+    "titles": {
+      "cancel_renewal": "取消续订",
+      "auto_renewal": "自动续订退款"
+    }
+  },
+  "replies": {
+    "ask_screenshot": "Dear {name},\n\nThank you for your support!\n\nAs we're currently unable to verify YouTube subscriptions from our end, could you please send us a screenshot showing that you've subscribed to our YouTube channel? Once we receive it, we will add the free credits to your account as soon as possible.",
+    "ask_comparison": "Dear {name},\n\nThank you for contacting us, and we're sorry to hear that the result did not meet your expectations.\n\nTo help us look into this, could you please send us a few comparison screenshots (the original vs. the processed result), and let us know which AI model and settings you used? A short sample of the original video would also be very helpful.\n\nOur technical team will check it and get back to you with suggestions as soon as possible.",
+    "ask_log": "Dear {name},\n\nThank you for contacting us, and we're sorry for the trouble.\n\nTo help our technical team find the cause, could you please send us the program's log files, a screenshot of the error (if any), and your computer's specifications (operating system, CPU, graphics card and RAM)?\n\nWe will check it and get back to you as soon as possible."
+  },
+  "system": [
+    "You triage customer support tickets for AVCLabs (AI video/photo enhancement software sold by subscription).",
+    "For EACH ticket in the input, return its category, case and a one-sentence summary.",
+    "category must be one of: cancel_renewal, free_credit, refund, consult, technical, invoice, other.",
+    "- cancel_renewal: the customer only wants to stop / cancel auto-renewal or the subscription (no refund asked).",
+    "- free_credit: the customer asks for free credits for following / subscribing to our social media (YouTube, X/Twitter, Facebook, Instagram...).",
+    "- refund: the customer asks for money back, disputes a charge, or asks to apply a payment elsewhere because of an unwanted charge.",
+    "- consult: questions about products, pricing, plans, licenses / registration codes, how to use the software, pre-sales.",
+    "- technical: the program crashes, errors, freezes or fails, without asking for a refund.",
+    "- invoice: invoice / receipt / VAT requests.",
+    "- other: anything else.",
+    "case (only for refund, otherwise \"\"): auto_renewal (charged by an automatic renewal they did not expect), effect_unsatisfied (unhappy with the enhancement result / quality), program_issue (the program crashes, errors or doesn't work), or \"\" if none fits.",
+    "summary: ONE short sentence in Simplified Chinese (max 40 characters) saying what the customer wants, with key facts (amounts, plans, products).",
+    "Output strictly JSON: {\"results\":[{\"id\":\"<ticket id>\",\"category\":\"...\",\"case\":\"...\",\"summary\":\"...\"}]}"
+  ],
+  "draft_system": [
+    "You are a customer support agent at AVCLabs (AI video/photo enhancement software).",
+    "Write the body of a reply email in English to the customer's latest message.",
+    "Start with \"Dear {name},\" on its own line. Do NOT add a sign-off or signature (the system appends it).",
+    "Use only the facts in [COMPANY CONTEXT] and the order information; never invent prices, policies, features or links.",
+    "If the answer is not in the context, politely say we are checking with the relevant team and will get back soon, and ask for any details we need.",
+    "Keep it concise, friendly and professional.",
+    "Output strictly JSON: {\"draft\":\"<reply body>\"}"
+  ]
+}

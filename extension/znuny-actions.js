@@ -222,8 +222,8 @@
   }
 
   // Reply: the agent's own reply window, opened by the panel, gets the draft.
-  function replyUrl(ticketId) {
-    const forms = Array.from(document.querySelectorAll("form[id^='Reply']"))
+  function replyUrl(ticketId, root = document, base = location.href) {
+    const forms = Array.from(root.querySelectorAll("form[id^='Reply']"))
       .filter((f) => f.querySelector("input[name='Action'][value='AgentTicketCompose']"));
     if (!forms.length) throw new Error("页面上没有找到回复表单");
     // Latest article = highest ArticleID.
@@ -237,8 +237,29 @@
     params.set("Action", "AgentTicketCompose");
     params.set("TicketID", ticketId);
     params.set("ResponseID", empty ? empty.value : "");
-    return { url: new URL(`${form.getAttribute("action") || "index.pl"}?${params}`, location.href).toString(), template: empty?.textContent.trim() || "" };
+    return { url: new URL(`${form.getAttribute("action") || "index.pl"}?${params}`, base).toString(), template: empty?.textContent.trim() || "" };
   }
+
+  // ─── Reply from the queue page (no zoom page open) ──────────────────────────
+
+  async function composeUrlFor(ticketId) {
+    const { doc, url } = await fetchDoc(indexUrl(`Action=AgentTicketZoom;TicketID=${encodeURIComponent(ticketId)}`));
+    return replyUrl(ticketId, doc, url).url;
+  }
+
+  // Opens the agent's own reply window with the draft filled in, for review.
+  // Pass a window opened synchronously in the click handler (`win`): after
+  // the awaits here the click no longer counts and a new popup is blocked.
+  async function openReplyDraft(ticketId, { text, win }) {
+    const url = await composeUrlFor(ticketId);
+    await chrome.storage.local.set({ [PENDING_REPLY_KEY]: { ticketId: String(ticketId), text, ts: Date.now() } });
+    if (win && !win.closed) win.location.href = url;
+    else if (!window.open(url, `ec-reply-${ticketId}`, "width=1100,height=850")) throw new Error("回复窗口被浏览器拦截，请允许本站弹出窗口");
+    return { ok: true };
+  }
+
+  // Shared with queue-triage.js (same content-script world).
+  window.__ecZnuny = { addNote, changeOwner, openReplyDraft, indexUrl, fetchDoc };
 
   // Read-only: what the plugin would see in a popup form.
   async function inspectForm(ticketId, action) {

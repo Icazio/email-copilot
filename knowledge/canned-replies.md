@@ -16,10 +16,18 @@ We have received your request and will assist you in submitting your refund requ
 ## 取消自动续订申请已收到（仅限只取消、不退款；有退款时不用这条，退款即自动取消）
 We have received your request and will assist you in submitting your request to cancel your auto-renewal. You will be notified by email upon success.
 
-## 询问退款原因（不适用于自动续订扣款的退款）
+## 询问退款原因（首次购买 / 30 天退款保证 / Paddle 转来的退款且未说明具体原因时用这条；不适用于自动续订扣款的退款）
 To help us better understand your situation and process your request smoothly, could you kindly share the reason for your refund request? If there were any specific issues or challenges you encountered, a more detailed description or screenshots would be greatly appreciated.
 
 We look forward to hearing from you and assisting you further.
+
+## 索要效果对比截图（客户因效果不满意 / not as advertised 要求退款时用这条）
+To help us better understand the issue, could you kindly send us a before-and-after comparison screenshot of the result you were not satisfied with? If possible, please also let us know the settings or AI model you used.
+
+We look forward to hearing from you and assisting you further.
+
+## 查不到订单（用客户邮箱查不到任何订单时用这条）
+We could not find an order under this email address. Could you kindly let us know any other email address you may have used for the purchase, or forward us the order receipt? This will help us locate your order.
 
 ## 索要原视频（问题需开发排查）
 We have shared the issue you reported with our development team for further investigation. To help them accurately analyze and identify the root cause, they kindly asked if you could provide the original video file where the issue occurs.

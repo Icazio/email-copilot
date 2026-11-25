@@ -108,33 +108,54 @@
     return Object.keys(record).length ? [record] : [];
   }
 
+  // "2026-11-18 - STRIPE - ch_xxx - LICENSE - USD44.95 - PAID". The license
+  // key (or order ID) may be empty ("82765308 - - USD56.83"), so match fields
+  // by position instead of splitting and dropping empties.
+  function parseFinancialLine(line) {
+    const text = String(line || "").replace(/\s+/g, " ").trim();
+    const m = text.match(
+      /^(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)\s*-\s*(\S+)\s*-\s*(\S*)\s*-\s*(.*?)\s*-\s*([A-Z]{3}\s?[\d.,]+)\s*-\s*([A-Z_]+)\b/
+    );
+    const parts = m
+      ? m.slice(1).map((p) => (p === "-" ? "" : (p || "").trim()))
+      : text.split(/\s+-\s+/).map((s) => s.trim());
+    return {
+      rest: m ? text.slice(m[0].length).trim() : "",
+      "Purchase Date": parts[0] || "",
+      Provider:        parts[1] || "",
+      "Order ID":      parts[2] || "",
+      "License Key":   parts[3] || "",
+      Amount:          parts[4] || "",
+      Status:          (m ? parts[5] : parts.slice(5).join(" - ")) || ""
+    };
+  }
+
   function parseOrderRowsFromDetailBlocks(detailBlocks, email) {
     const ep = String(email || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    const re = new RegExp(
-      `(?:([^<\\n]+?)\\s*)?<${ep}>\\s+([A-Z]{2})\\s+\\[([^\\]]+)\\]\\s+([\\s\\S]*?)(?=(?:(?:[^<\\n]+?)\\s*)?<${ep}>\\s+[A-Z]{2}\\s+\\[|$)`,
-      "gi"
-    );
+    // Country code is optional — some orders (e.g. Stripe) carry none.
+    // Whitespace is collapsed here, so locate the headers first; the text
+    // between two headers is "<financial line> <next customer name>".
+    const re = new RegExp(`<${ep}>\\s*(?:([A-Z]{2})\\s+)?\\[([^\\]]+)\\]`, "gi");
     for (const block of detailBlocks) {
       const text = String(block?.text_full || block?.text_preview || "")
         .replace(/\s+/g, " ").replace(/^.*?Details of Order\s*/i, "").trim();
       const matches = Array.from(text.matchAll(re));
       if (!matches.length) continue;
-      return matches.map((m) => {
-        const tail  = String(m[4] || "").replace(/\s+/g, " ").trim();
-        const parts = tail.split(/\s+-\s+/).map((s) => s.trim()).filter(Boolean);
-        return {
-          Customer:        String(m[1] || "").trim(),
-          Email:           email,
-          Country:         String(m[2] || "").trim(),
-          Product:         String(m[3] || "").trim(),
-          "Purchase Date": parts[0] || "",
-          Provider:        parts[1] || "",
-          "Order ID":      parts[2] || "",
-          "License Key":   parts[3] || "",
-          Amount:          parts[4] || "",
-          Status:          parts.slice(5).join(" - ") || ""
+      let customer = text.slice(0, matches[0].index).trim();
+      const rows = matches.map((m, i) => {
+        const end = i + 1 < matches.length ? matches[i + 1].index : text.length;
+        const { rest, ...fin } = parseFinancialLine(text.slice(m.index + m[0].length, end));
+        const row = {
+          Customer: customer,
+          Email:    email,
+          Country:  String(m[1] || "").trim(),
+          Product:  String(m[2] || "").trim(),
+          ...fin
         };
-      }).filter((r) => r.Product || r["Order ID"] || r.Amount);
+        customer = rest;
+        return row;
+      });
+      return rows.filter((r) => r.Product || r["Order ID"] || r.Amount);
     }
     return [];
   }
@@ -188,7 +209,8 @@
 
     for (const h4 of h4s) {
       const headerText = h4.textContent.replace(/\s+/g, " ").trim();
-      const m = headerText.match(/<([^>]+)>\s+([A-Z]{2})\s+\[([^\]]+)\]/);
+      // Country code is optional — some orders (e.g. Stripe) carry none.
+      const m = headerText.match(/<([^>]+)>\s*(?:([A-Z]{2})\s+)?\[([^\]]+)\]/);
       if (!m) continue;
 
       let next = h4.nextElementSibling;
@@ -196,21 +218,15 @@
         next = next.nextElementSibling;
       }
 
-      const financial = (next?.tagName === "P")
-        ? next.textContent.replace(/\s+/g, " ").trim()
-        : "";
-      const parts = financial.split(/\s+-\s+/).map((s) => s.trim()).filter(Boolean);
+      const financial = (next?.tagName === "P") ? next.textContent : "";
+      const { rest: _rest, ...fin } = parseFinancialLine(financial);
 
       results.push({
-        Email:           m[1],
-        Country:         m[2],
-        Product:         m[3],
-        "Purchase Date": parts[0] || "",
-        Provider:        parts[1] || "",
-        "Order ID":      parts[2] || "",
-        "License Key":   parts[3] || "",
-        Amount:          parts[4] || "",
-        Status:          parts.slice(5).join(" - ") || ""
+        Customer: headerText.slice(0, headerText.indexOf("<")).trim(),
+        Email:    m[1],
+        Country:  m[2] || "",
+        Product:  m[3],
+        ...fin
       });
     }
 
@@ -361,9 +377,9 @@
   }
 
   // Emails that are intermediaries — real customer email must come from body
-  const RELAY_EMAILS = /^(assist@paddle\.com)$/i;
+  const RELAY_EMAILS = /@paddle\.(com|net)$/i;
 
-  const SYSTEM_EMAILS = /assist@paddle\.com|support@avclabs\.com|noreply@/i;
+  const SYSTEM_EMAILS = /@(paddle\.com|paddle\.net|avclabs\.com)$|^(no-?reply|mailer-daemon|postmaster)@/i;
 
   function extractEmailFromBody(ticket) {
     const text = ticket.querySelector("div.Preview .Content.ArticleBody")?.innerText || "";
@@ -414,8 +430,15 @@
       try {
         const rows = await searchOrders(origin, email);
         renderOrderResult(ticket, rows);
+        // queue-triage.js puts these into the transfer note for Julie.
+        ticket.__ecOrderRows = rows;
+        ticket.__ecOrderEmail = email;
         // queue-spam.js treats customers with orders as never-spam.
-        ticket.dispatchEvent(new CustomEvent("ec:orders", { bubbles: true, detail: { count: rows.length } }));
+        // queue-routing.js uses the products to spot tickets in the wrong queue.
+        ticket.dispatchEvent(new CustomEvent("ec:orders", {
+          bubbles: true,
+          detail: { count: rows.length, products: rows.map((r) => r.Product || "").filter(Boolean) }
+        }));
       } catch (_) {
         const cell = ticket.querySelector(".ec-order-row td");
         if (cell) cell.innerHTML = "";
@@ -426,6 +449,10 @@
     const workers = Array.from({ length: Math.min(CONCURRENCY, work.length) }, runNext);
     await Promise.allSettled(workers);
   }
+
+  // Shared with queue-routing.js (same content-script world): its crawler
+  // looks up the customers of tickets in other queues.
+  window.__ecOrderLookup = { searchOrders, resolveCustomerEmail };
 
   if (document.readyState === "loading") {
     document.addEventListener("DOMContentLoaded", initQueueOrderLookup);

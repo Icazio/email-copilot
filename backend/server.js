@@ -10,6 +10,9 @@ const { createSpamLists } = require("./lib/spam-lists");
 const { createSpamClassifier } = require("./lib/spam-classifier");
 const { handleSpamRoute } = require("./lib/spam-routes");
 const { handleRecordRoute } = require("./lib/record-routes");
+const { createQueueRouting } = require("./lib/queue-routing");
+const { handleQueueRoutingRoute } = require("./lib/queue-routing-routes");
+const { createQueueTriage } = require("./lib/queue-triage");
 
 function loadDotEnv() {
   const envPath = path.resolve(__dirname, "../.env");
@@ -67,6 +70,12 @@ const PROVIDER = resolveProvider();
 const MODEL = resolveModel(PROVIDER);
 const templates = loadTemplates();
 const spamLists = createSpamLists();
+const queueRouting = createQueueRouting();
+const queueTriage = createQueueTriage({
+  provider: PROVIDER,
+  model: MODEL,
+  callModel: PROVIDER === "deepseek" ? callDeepSeekChat : PROVIDER === "openai" ? callResponsesAPI : null
+});
 const spamClassifier = createSpamClassifier({
   provider: PROVIDER,
   model: MODEL,
@@ -165,6 +174,30 @@ async function routeRequest(req, res) {
   }
 
   if (await handleSpamRoute(req, res, requestUrl.pathname, { lists: spamLists, classifier: spamClassifier, log })) {
+    return;
+  }
+
+  if (await handleQueueRoutingRoute(req, res, requestUrl.pathname, { routing: queueRouting, log })) {
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/queue-triage") {
+    const t0 = Date.now();
+    const result = await queueTriage.triage(await readJsonBody(req));
+    log("POST /queue-triage", { tickets: result.results.length, ms: Date.now() - t0 });
+    sendJson(res, 200, result);
+    return;
+  }
+
+  if (req.method === "POST" && requestUrl.pathname === "/queue-triage/draft") {
+    const t0 = Date.now();
+    try {
+      const result = await queueTriage.draft(await readJsonBody(req));
+      log("POST /queue-triage/draft", { engine: result.engine, knowledge: result.knowledge, ms: Date.now() - t0 });
+      sendJson(res, 200, result);
+    } catch (error) {
+      sendJson(res, 502, { detail: `生成回复失败：${error.message}` });
+    }
     return;
   }
 

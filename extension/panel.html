@@ -23,7 +23,6 @@
       <!-- Tool links -->
       <div class="tool-links">
         <a href="http://sz.anvsoft-dev.com:81/login?back_url=http%3A%2F%2Fsz.anvsoft-dev.com%3A81%2Fprojects" target="_blank" class="tool-link">Redmine</a>
-        <a href="https://onedrive.live.com/view.aspx?cid=0&resid=9B933E8E402555BD!2536&origin=DigestEmail&extension=extension&e=vTZG6pjLO0uqFhVelm49Tw&at=20" target="_blank" class="tool-link">退款表格</a>
         <a href="https://ipn.anvsoftware.com/query/index.php" target="_blank" class="tool-link">技术支持</a>
         <a href="https://docs.qq.com/sheet/DWmVpcVpqWGRiTUVK?tab=BB08J2" target="_blank" class="tool-link">Credit 表格</a>
       </div>
@@ -75,6 +74,20 @@
           <textarea id="manualLookup" rows="5" placeholder="订单查询结果将显示在这里，或手动粘贴..."></textarea>
         </div>
       </div>
+
+      <!-- License activation (ipn.anvsoftware.com/query/onlinecheck.php) -->
+      <details class="card" id="licenseCard">
+        <summary class="card-summary">🔑 注册码激活查询 / 重置</summary>
+        <div class="ta-hint">使用技术支持系统（需已在浏览器登录）。订单卡片上的「激活」按钮会自动填好。</div>
+        <div class="ta-group">
+          <select id="licProduct"><option value="">— 展开后加载产品列表 —</option></select>
+          <input id="licEmail" type="email" placeholder="注册邮箱" />
+          <input id="licCode" type="text" placeholder="注册码" />
+          <div class="ta-row"><button id="licQueryBtn" class="btn-secondary">查询</button></div>
+        </div>
+        <div id="licResult" style="margin-top:8px"></div>
+        <div id="licStatus" class="ta-status"></div>
+      </details>
 
       <!-- Chatbox -->
       <div class="chat-wrap">
@@ -191,5 +204,6 @@
     </div>
     <script src="panel.js"></script>
     <script src="panel-actions.js"></script>
+    <script src="panel-license.js"></script>
   </body>
 </html>

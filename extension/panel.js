@@ -249,6 +249,88 @@ function warnIfIncomplete(response) {
   const failed = failedBodyCount(response);
   if (failed > 0) {
     showStatusBanner(`有 ${failed} 封邮件内容没加载出来，草稿可能不完整。请稍后再点 Capture。`);
+  } else if (response?.debug?.translated_fallback) {
+    showStatusBanner("页面开着浏览器翻译，标题和发件人可能是译文。建议关闭网页翻译后再点 Capture。");
+  }
+}
+
+// ── Draft cache (per ticket, survives panel reloads) ─────────────────────────
+// Re-opening a ticket whose thread has not changed restores the last draft
+// instead of asking the model again (≈40% of first drafts were duplicates).
+const DRAFT_CACHE_KEY = "draftCache";
+const DRAFT_CACHE_MAX = 60;
+const DRAFT_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
+
+function hashText(text) {
+  let h = 0x811c9dc5;
+  const s = String(text || "");
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
+function threadHash(subject, threadText) {
+  return hashText(`${subject}\n${threadText}`);
+}
+
+async function readDraftCache() {
+  try {
+    const stored = await chrome.storage.local.get(DRAFT_CACHE_KEY);
+    return stored[DRAFT_CACHE_KEY] || {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+async function loadCachedDraft(ticketId, hash) {
+  if (!ticketId) return null;
+  const entry = (await readDraftCache())[ticketId];
+  if (!entry || entry.hash !== hash || !Array.isArray(entry.history) || !entry.history.length) return null;
+  if (Date.now() - entry.savedAt > DRAFT_CACHE_TTL_MS) return null;
+  return entry;
+}
+
+async function saveCachedDraft(ticketId, hash, history) {
+  if (!ticketId || !history.length) return;
+  try {
+    const cache = await readDraftCache();
+    cache[ticketId] = { hash, history: history.slice(-20), savedAt: Date.now() };
+    const keep = Object.entries(cache)
+      .filter(([, v]) => Date.now() - v.savedAt <= DRAFT_CACHE_TTL_MS)
+      .sort((a, b) => b[1].savedAt - a[1].savedAt)
+      .slice(0, DRAFT_CACHE_MAX);
+    await chrome.storage.local.set({ [DRAFT_CACHE_KEY]: Object.fromEntries(keep) });
+  } catch (_error) {
+    // Cache is a convenience; never block drafting on it.
+  }
+}
+
+async function forgetCachedDraft(ticketId) {
+  if (!ticketId) return;
+  try {
+    const cache = await readDraftCache();
+    delete cache[ticketId];
+    await chrome.storage.local.set({ [DRAFT_CACHE_KEY]: cache });
+  } catch (_error) { /* ignore */ }
+}
+
+// ── Non-customer mail check before auto-drafting ─────────────────────────────
+// Reuses the queue's spam classifier (cached per TicketID on the backend, so a
+// ticket already seen in the queue costs no extra AI call).
+async function looksLikeNonCustomerMail(ticketId) {
+  try {
+    const result = await postJson("/spam/classify", {
+      ticket_id: ticketId,
+      sender: getCandidateCustomerEmail() || "",
+      subject: elements.subject.value,
+      preview: elements.threadText.value.slice(0, 800),
+      has_order: /\b(PAID|SUBSCRIPTION_[A-Z_]+|REFUNDED)\b/.test(elements.manualLookup.value)
+    });
+    return result?.verdict === "spam" ? result : null;
+  } catch (_error) {
+    return null; // backend without the spam routes, or offline: just draft
   }
 }
 
@@ -288,6 +370,15 @@ function extractLabeledCustomerEmail(text) {
   return match ? match[1] : "";
 }
 
+// Relays and our own addresses are never the customer (Paddle forwards as
+// assist@ / assist+seller@paddle.com with the customer in the quoted body).
+const NON_CUSTOMER_EMAIL = /@(paddle\.com|paddle\.net|avclabs\.com)$|^(no-?reply|mailer-daemon|postmaster)@/i;
+
+function firstCustomerEmail(text) {
+  return (String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])
+    .find((email) => !NON_CUSTOMER_EMAIL.test(email)) || "";
+}
+
 function getCandidateCustomerEmail() {
   const labeledFromThread = extractLabeledCustomerEmail(elements.threadText.value);
   if (labeledFromThread) {
@@ -301,7 +392,7 @@ function getCandidateCustomerEmail() {
     return labeledFromBodies;
   }
 
-  const structuredCandidate = extractFirstEmail(lastThreadStructured?.customer_email || "");
+  const structuredCandidate = firstCustomerEmail(lastThreadStructured?.customer_email || "");
   if (structuredCandidate) {
     return structuredCandidate;
   }
@@ -310,14 +401,14 @@ function getCandidateCustomerEmail() {
     ? lastThreadStructured.customer_email_candidates
     : [];
   const pageCandidate = candidateList
-    .map((item) => extractFirstEmail(item))
+    .map((item) => firstCustomerEmail(item))
     .find(Boolean);
   if (pageCandidate) {
     return pageCandidate;
   }
 
   const articleSenderEmail = lastThreadStructured?.articles
-    ?.map((item) => extractFirstEmail(item?.sender || ""))
+    ?.map((item) => firstCustomerEmail(item?.sender || ""))
     .find(Boolean);
 
   if (articleSenderEmail) {
@@ -325,13 +416,13 @@ function getCandidateCustomerEmail() {
   }
 
   const articleBodyEmail = lastThreadStructured?.articles
-    ?.map((item) => extractFirstEmail(item?.body || ""))
+    ?.map((item) => firstCustomerEmail(item?.body || ""))
     .find(Boolean);
   if (articleBodyEmail) {
     return articleBodyEmail;
   }
 
-  return extractFirstEmail(elements.threadText.value);
+  return firstCustomerEmail(elements.threadText.value);
 }
 
 function parseOrderSearchForms(doc) {
@@ -736,6 +827,7 @@ function renderOrderResults(rows, customerEmail) {
           <span class="order-field-label">License</span>
           <span class="order-field-value" title="${row["License Key"]}">${row["License Key"]}</span>
           <button class="copy-chip" data-copy="${row["License Key"]}">Copy</button>
+          <button class="lic-check-btn" data-code="${escapeHtml(row["License Key"]).replace(/"/g, "&quot;")}" data-product="${escapeHtml(row.Product || "").replace(/"/g, "&quot;")}" title="在技术支持系统查询激活情况 / 重置激活次数">激活</button>
         </div>` : "";
 
       return `
@@ -1112,6 +1204,7 @@ async function sendChatMessage(userText) {
   elements.chatSendBtn.disabled = true;
   setStatus("thinking…");
   const ticketAtStart = currentTicketId;
+  const hashAtStart = threadHash(elements.subject.value, elements.threadText.value);
 
   try {
     const data = await postJson("/chat", {
@@ -1128,12 +1221,17 @@ async function sendChatMessage(userText) {
     const reply = data.reply || "(no response)";
     if (ticketAtStart !== currentTicketId) {
       // The agent switched tickets while we waited: file the reply under its own ticket.
-      ticketStates.get(ticketAtStart)?.history.push({ role: "assistant", content: reply });
+      const saved = ticketStates.get(ticketAtStart);
+      if (saved) {
+        saved.history.push({ role: "assistant", content: reply });
+        saveCachedDraft(ticketAtStart, hashAtStart, saved.history);
+      }
       return;
     }
     chatHistory.push({ role: "assistant", content: reply });
     appendChatMessage("assistant", reply);
     setStatus("ready");
+    saveCachedDraft(currentTicketId, hashAtStart, chatHistory);
   } catch (error) {
     thinkingEl.remove();
     if (ticketAtStart !== currentTicketId) {
@@ -1266,7 +1364,11 @@ elements.captureBtn.addEventListener("click", () => {
 
 elements.orderSearchBtn.addEventListener("click", () => runOrderSearch().catch(handleCaptureError));
 elements.orderSearchDebugBtn.addEventListener("click", () => runOrderSearch({ includeDebug: true }).catch(handleCaptureError));
-elements.clearBtn.addEventListener("click", clearPanel);
+elements.clearBtn.addEventListener("click", () => {
+  // Clear = "start this ticket over": also drop its cached draft.
+  forgetCachedDraft(currentTicketId);
+  clearPanel();
+});
 
 elements.chatSendBtn.addEventListener("click", () => sendChatMessage(elements.chatInput.value));
 
@@ -1292,6 +1394,7 @@ elements.copyEmailBtn.addEventListener("click", () => {
 });
 
 elements.chatClearBtn.addEventListener("click", () => {
+  forgetCachedDraft(currentTicketId);
   chatHistory.length = 0;
   elements.chatMessages.innerHTML = "";
   elements.chatQuickActions.style.display = "";
@@ -1414,11 +1517,34 @@ async function runAutoDraft(ticketId) {
     return;
   }
 
+  if (captured?.debug?.translated_fallback) warnIfIncomplete(captured);
+
   await autoSearchOrdersAfterCapture();
   if (ticketId !== currentTicketId) return;
 
   // Respect anything the agent already started typing or sending meanwhile.
   if (chatHistory.length) return;
+
+  // Same thread as last time → restore that draft instead of re-generating.
+  const cached = await loadCachedDraft(ticketId, threadHash(elements.subject.value, elements.threadText.value));
+  if (ticketId !== currentTicketId || chatHistory.length) return;
+  if (cached) {
+    chatHistory.push(...cached.history);
+    elements.chatMessages.innerHTML = "";
+    chatHistory.forEach((m) => appendChatMessage(m.role, m.content));
+    elements.chatQuickActions.style.display = "none";
+    setStatus("已恢复上次的草稿（邮件没有变化）");
+    return;
+  }
+
+  const nonCustomer = await looksLikeNonCustomerMail(ticketId);
+  if (ticketId !== currentTicketId || chatHistory.length) return;
+  if (nonCustomer) {
+    setStatus("auto-draft skipped: 非客户邮件");
+    showStatusBanner(`看起来不是客户来信（${nonCustomer.reason || "推广/垃圾邮件"}），未自动起草。需要的话点"写回复"。`);
+    return;
+  }
+
   await sendChatMessage(AUTO_DRAFT_PROMPT);
 }
 

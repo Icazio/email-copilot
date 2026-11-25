@@ -132,7 +132,9 @@ function extractEmailsFromText(text) {
 
   function filterCustomerEmails(emails) {
     return emails.filter(
-      (email) => !/(support@avclabs\.com|assist@paddle\.com)$/i.test(email)
+      // Paddle forwards as assist@ / assist+seller@paddle.com; the customer
+      // is in the quoted body ("<x@y.com> wrote:").
+      (email) => !/@(paddle\.com|paddle\.net|avclabs\.com)$|^(no-?reply|mailer-daemon|postmaster)@/i.test(String(email).trim())
     );
   }
 
@@ -150,7 +152,14 @@ function extractEmailsFromText(text) {
       .slice(0, 20);
   }
 
-  function collectZnunySubject() {
+  function collectZnunySubject(root) {
+    if (root && root !== document) {
+      // Untranslated copy of the page (see getUntranslatedTicketDoc).
+      for (const selector of DEFAULT_SUBJECT_SELECTORS) {
+        const text = cleanText(root.querySelector(selector)?.textContent || "");
+        if (text) return { subject: text, matchedSelector: selector, inspected: [] };
+      }
+    }
     const selected = textFromSelectors(DEFAULT_SUBJECT_SELECTORS);
     return {
       subject: cleanText(selected.text),
@@ -159,8 +168,30 @@ function extractEmailsFromText(text) {
     };
   }
 
-  function collectAttachmentFilenames(articleId) {
-    const container = document.querySelector(`#TicketAttachment${articleId}`);
+  // Chrome's page translation rewrites the visible DOM (subject, sender names,
+  // attachment names) in place, so a capture would send translated text — e.g.
+  // the sender "Paddle" became "桨". Article bodies are fetched as raw HTML and
+  // are unaffected; for the rest we re-fetch the ticket page untranslated.
+  function isPageTranslated() {
+    const html = document.documentElement;
+    return html.classList.contains("translated-ltr") ||
+      html.classList.contains("translated-rtl") ||
+      Boolean(document.querySelector("font[style*='vertical-align: inherit']"));
+  }
+
+  async function getUntranslatedTicketDoc() {
+    try {
+      const response = await fetch(location.href, { credentials: "include" });
+      if (!response.ok) return null;
+      const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+      return doc.querySelector("#ArticleTableBody, #ArticleTable") ? doc : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function collectAttachmentFilenames(articleId, root = document) {
+    const container = root.querySelector(`#TicketAttachment${articleId}`);
     if (!container) return [];
     return Array.from(container.querySelectorAll(".AttachmentElement h3 a"))
       .map((a) => cleanText(a.textContent || ""))
@@ -174,23 +205,25 @@ function extractEmailsFromText(text) {
     return cleanText(label?.nextElementSibling?.querySelector("a")?.textContent || "");
   }
 
-  function collectZnunyRows() {
-    const rows = Array.from(document.querySelectorAll("#ArticleTableBody tbody tr, #ArticleTable tbody tr"))
+  function collectZnunyRows(root = document) {
+    const rows = Array.from(root.querySelectorAll("#ArticleTableBody tbody tr, #ArticleTable tbody tr"))
       .filter((row) => row.querySelector(".Sender, .Subject, .Created"));
 
     const items = rows.map((row) => {
       const number = cleanText(row.querySelector(".No")?.childNodes?.[0]?.textContent || "");
       const articleId = cleanText(row.querySelector("input.ArticleID")?.value || "");
       const articleInfo = cleanText(row.querySelector("input.ArticleInfo")?.value || "");
-      const sender = cleanText(row.querySelector(".Sender")?.innerText || "");
-      const subject = cleanText(row.querySelector(".Subject")?.innerText || "");
+      // A fetched (unrendered) document has no layout, so read textContent there.
+      const text = (el) => cleanText((root === document ? el?.innerText : el?.textContent) || "");
+      const sender = text(row.querySelector(".Sender"));
+      const subject = text(row.querySelector(".Subject"));
       const created =
         extractSortData(row.querySelector(".Created")) ||
-        cleanText(row.querySelector(".Created")?.innerText || "");
+        text(row.querySelector(".Created"));
       const directionNode = row.querySelector(".Direction .Incoming, .Direction .Outgoing");
       const direction = directionNode?.classList.contains("Outgoing") ? "outgoing" : "incoming";
       const status = row.classList.contains("Active") ? "active" : "listed";
-      const attachments = collectAttachmentFilenames(articleId);
+      const attachments = collectAttachmentFilenames(articleId, root);
 
       return {
         number,
@@ -518,9 +551,12 @@ function extractEmailsFromText(text) {
   }
 
   async function collectZnunyThreadText() {
-    const rows = collectZnunyRows();
+    const pageTranslated = isPageTranslated();
+    const untranslatedDoc = pageTranslated ? await getUntranslatedTicketDoc() : null;
+    const untranslatedRows = untranslatedDoc ? collectZnunyRows(untranslatedDoc) : [];
+    const rows = untranslatedRows.length ? untranslatedRows : collectZnunyRows();
     const fetchedBodies = await fetchArticleBodies(rows);
-    const ticketSubject = collectZnunySubject().subject;
+    const ticketSubject = collectZnunySubject(untranslatedRows.length ? untranslatedDoc : undefined).subject;
     const pageEmailCandidates = collectPageEmailCandidates();
     const readableThreadText = buildReadableZnunyThread(rows, fetchedBodies);
     const fetchedBodyCount = fetchedBodies.filter((item) => item.body).length;
@@ -543,6 +579,9 @@ function extractEmailsFromText(text) {
       failedBodyCount: failedIds.length,
       failedArticleIds: failedIds,
       latestIncomingFailed: Boolean(latestIncoming && failedIds.includes(latestIncoming.article_id)),
+      pageTranslated,
+      // true when the page is translated and we could NOT get the original text
+      translatedFallback: pageTranslated && !untranslatedRows.length,
       articleBodyLength: activeArticleBody.length,
       rows,
       structured: {
@@ -637,6 +676,8 @@ function extractEmailsFromText(text) {
       znuny_failed_body_count: threadResult.failedBodyCount || 0,
       znuny_failed_article_ids: threadResult.failedArticleIds || [],
       znuny_latest_incoming_failed: Boolean(threadResult.latestIncomingFailed),
+      page_translated: Boolean(threadResult.pageTranslated),
+      translated_fallback: Boolean(threadResult.translatedFallback),
       znuny_article_body_length: threadResult.articleBodyLength || 0,
       znuny_iframe_ids: (threadResult.structured?.iframe_articles || [])
         .slice(0, 10)
@@ -672,7 +713,8 @@ function extractEmailsFromText(text) {
         frame_context: window.top === window ? "top" : "iframe",
         url: location.href,
         title: document.title,
-        subject: subjectResult.subject,
+        // Prefer the subject read from the untranslated page when available.
+        subject: threadResult.structured?.ticket_subject || subjectResult.subject,
         thread_text: threadResult.thread_text,
         thread_structured: threadResult.structured || null,
         debug: collectDebugInfo(subjectResult, threadResult, subjectSelectors, threadSelectors, messageSelectors)

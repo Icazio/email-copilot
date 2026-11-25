@@ -53,6 +53,30 @@
       "title": "Email Address Change",
       "tags": ["change email", "update email", "new email", "old email", "email address", "修改邮箱", "换邮箱"],
       "content": "Customers who want to change their registered email address should contact support. The agent handles this via the internal support platform. The customer must provide their current registered email address to verify identity before the change can be made."
+    },
+    {
+      "id": "product-010",
+      "title": "Photo Enhancer AI Version 4 Upgrade",
+      "tags": ["ver. 4", "ver 4", "version 4", "v4", "upgrade", "photo enhancer", "update", "升级", "新版本"],
+      "content": "Photo Enhancer AI version 4 must be updated from the official website: the customer downloads the latest installer from avclabs.com and installs it. If a customer has problems after moving to version 4 (e.g. AI engine errors, license not recognized), first make sure they installed version 4 from the official website."
+    },
+    {
+      "id": "product-011",
+      "title": "Video Blur AI — New Installation Method",
+      "tags": ["video blur", "blur", "install", "reinstall", "installer", "mp4", "update", "setup", "重新安装", "安装"],
+      "content": "The latest Video Blur AI version uses a new installation method. The customer should uninstall the old version, then download the installer directly from the official website and reinstall: https://www.avclabs.com/ai_update/video_blur_ai_setup.exe . Reinstalling this way may also resolve MP4 import/export problems."
+    },
+    {
+      "id": "product-012",
+      "title": "AI Model Folder Inside OneDrive",
+      "tags": ["onedrive", "init mosaic ai failure", "ai failure", "model", "models", "ai engine", "sync", "AIEnhancer", "同步", "模型"],
+      "content": "If the AI model folder is inside a OneDrive-synced directory, OneDrive syncing can leave model files empty or truncated on disk, so every AI operation fails (e.g. 'Init mosaic AI failure'). Fix: install the latest version (e.g. Video Blur AI 4.0.2) so the models are downloaded again in full; when asked for the AI file location, choose a local folder that OneDrive does not sync (e.g. C:\\AVCLabs); keep source videos in a local folder too; after it works, the old model folder can be deleted. Without a dedicated GPU, AI processing runs on the CPU and is slower but works."
+    },
+    {
+      "id": "product-013",
+      "title": "Credits Delivered But Customer Says They Do Not Work",
+      "tags": ["credits", "credit", "coins", "not working", "doesn't work", "never worked", "积分", "不能用"],
+      "content": "When the order shows the credits were delivered to the account (e.g. 3000 credits) but the customer says they still do not work, tell them the credits are in their account and ask what exactly happens when they try to use them, with a screenshot of the screen or error message."
     }
   ]
 }
