@@ -1,6 +1,6 @@
 {
   "name": "email-copilot-mvp",
-  "version": "0.1.0",
+  "version": "1.0.0",
   "private": true,
   "description": "Zero-dependency browser extension and backend skeleton for an internal email support copilot.",
   "scripts": {
