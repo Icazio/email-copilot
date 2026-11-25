@@ -1,0 +1,32 @@
+{
+  "refund_auto_renewal": {
+    "pattern": "/(auto-renew|renewed automatically)/i",
+    "description": "Customer disputes auto-renewal charge",
+    "category": "refund"
+  },
+  "cancel_renewal": {
+    "pattern": "/(cancel renewal|cancel subscription|stop renewal)/i",
+    "description": "Customer wants to cancel or stop auto-renewal",
+    "category": "cancel_renewal"
+  },
+  "invoice_request": {
+    "pattern": "/(invoice|tax invoice|receipt)/i",
+    "description": "Customer requests invoice or billing document",
+    "category": "invoice"
+  },
+  "license_code_not_working": {
+    "pattern": "/(license code|registration code|activation code|serial|can't activate|cannot activate|new code)/i",
+    "description": "Customer has trouble with license or activation code",
+    "category": "account"
+  },
+  "technical_issue": {
+    "pattern": "/(slow|crash|error|failed|freeze|program issue)/i",
+    "description": "Customer reports performance or stability issue",
+    "category": "technical"
+  },
+  "general": {
+    "pattern": "none",
+    "description": "General inquiry or other issue",
+    "category": "general"
+  }
+}

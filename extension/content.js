@@ -102,11 +102,7 @@
     };
   }
 
-  function stripTicketPrefix(subject) {
-    return cleanText(String(subject || "").replace(/^Ticket#\S+\s*(?:[—–-]\s*)?/i, ""));
-  }
-
-  function extractSortData(cell) {
+function extractSortData(cell) {
     return cleanText(cell?.querySelector(".SortData")?.value || "");
   }
 
@@ -136,7 +132,9 @@ function extractEmailsFromText(text) {
 
   function filterCustomerEmails(emails) {
     return emails.filter(
-      (email) => !/(support@avclabs\.com|assist@paddle\.com)$/i.test(email)
+      // Paddle forwards as assist@ / assist+seller@paddle.com; the customer
+      // is in the quoted body ("<x@y.com> wrote:").
+      (email) => !/@(paddle\.com|paddle\.net|avclabs\.com)$|^(no-?reply|mailer-daemon|postmaster)@/i.test(String(email).trim())
     );
   }
 
@@ -146,23 +144,54 @@ function extractEmailsFromText(text) {
     const mailtoEmails = Array.from(document.querySelectorAll("a[href^='mailto:']"))
       .map((node) => cleanText((node.getAttribute("href") || "").replace(/^mailto:/i, "")))
       .filter(Boolean);
+    const senderSortDataEmails = Array.from(document.querySelectorAll(".Sender .SortData"))
+      .flatMap((input) => extractEmailsFromText(input.value || ""));
 
-    return filterCustomerEmails([...labeledEmails, ...pageTextEmails, ...mailtoEmails])
+    return filterCustomerEmails([...labeledEmails, ...pageTextEmails, ...mailtoEmails, ...senderSortDataEmails])
       .filter((item, index, items) => items.indexOf(item) === index)
       .slice(0, 20);
   }
 
-  function collectZnunySubject() {
+  function collectZnunySubject(root) {
+    if (root && root !== document) {
+      // Untranslated copy of the page (see getUntranslatedTicketDoc).
+      for (const selector of DEFAULT_SUBJECT_SELECTORS) {
+        const text = cleanText(root.querySelector(selector)?.textContent || "");
+        if (text) return { subject: text, matchedSelector: selector, inspected: [] };
+      }
+    }
     const selected = textFromSelectors(DEFAULT_SUBJECT_SELECTORS);
     return {
-      subject: stripTicketPrefix(selected.text.split("\n")[0].slice(0, 300)),
+      subject: cleanText(selected.text),
       matchedSelector: selected.matchedSelector,
       inspected: selected.inspected
     };
   }
 
-  function collectAttachmentFilenames(articleId) {
-    const container = document.querySelector(`#TicketAttachment${articleId}`);
+  // Chrome's page translation rewrites the visible DOM (subject, sender names,
+  // attachment names) in place, so a capture would send translated text — e.g.
+  // the sender "Paddle" became "桨". Article bodies are fetched as raw HTML and
+  // are unaffected; for the rest we re-fetch the ticket page untranslated.
+  function isPageTranslated() {
+    const html = document.documentElement;
+    return html.classList.contains("translated-ltr") ||
+      html.classList.contains("translated-rtl") ||
+      Boolean(document.querySelector("font[style*='vertical-align: inherit']"));
+  }
+
+  async function getUntranslatedTicketDoc() {
+    try {
+      const response = await fetch(location.href, { credentials: "include" });
+      if (!response.ok) return null;
+      const doc = new DOMParser().parseFromString(await response.text(), "text/html");
+      return doc.querySelector("#ArticleTableBody, #ArticleTable") ? doc : null;
+    } catch (_error) {
+      return null;
+    }
+  }
+
+  function collectAttachmentFilenames(articleId, root = document) {
+    const container = root.querySelector(`#TicketAttachment${articleId}`);
     if (!container) return [];
     return Array.from(container.querySelectorAll(".AttachmentElement h3 a"))
       .map((a) => cleanText(a.textContent || ""))
@@ -171,28 +200,30 @@ function extractEmailsFromText(text) {
 
   function collectCustomerIdFromSidebar() {
     const label = Array.from(document.querySelectorAll("label")).find(
-      (el) => cleanText(el.textContent) === "客户ID:"
+      (el) => /^(客户ID|Customer ID)\s*[:：]?$/i.test(cleanText(el.textContent))
     );
     return cleanText(label?.nextElementSibling?.querySelector("a")?.textContent || "");
   }
 
-  function collectZnunyRows() {
-    const rows = Array.from(document.querySelectorAll("#ArticleTableBody tbody tr, #ArticleTable tbody tr"))
+  function collectZnunyRows(root = document) {
+    const rows = Array.from(root.querySelectorAll("#ArticleTableBody tbody tr, #ArticleTable tbody tr"))
       .filter((row) => row.querySelector(".Sender, .Subject, .Created"));
 
     const items = rows.map((row) => {
       const number = cleanText(row.querySelector(".No")?.childNodes?.[0]?.textContent || "");
       const articleId = cleanText(row.querySelector("input.ArticleID")?.value || "");
       const articleInfo = cleanText(row.querySelector("input.ArticleInfo")?.value || "");
-      const sender = cleanText(row.querySelector(".Sender")?.innerText || "");
-      const subject = cleanText(row.querySelector(".Subject")?.innerText || "");
+      // A fetched (unrendered) document has no layout, so read textContent there.
+      const text = (el) => cleanText((root === document ? el?.innerText : el?.textContent) || "");
+      const sender = text(row.querySelector(".Sender"));
+      const subject = text(row.querySelector(".Subject"));
       const created =
         extractSortData(row.querySelector(".Created")) ||
-        cleanText(row.querySelector(".Created")?.innerText || "");
+        text(row.querySelector(".Created"));
       const directionNode = row.querySelector(".Direction .Incoming, .Direction .Outgoing");
       const direction = directionNode?.classList.contains("Outgoing") ? "outgoing" : "incoming";
       const status = row.classList.contains("Active") ? "active" : "listed";
-      const attachments = collectAttachmentFilenames(articleId);
+      const attachments = collectAttachmentFilenames(articleId, root);
 
       return {
         number,
@@ -256,7 +287,12 @@ function extractEmailsFromText(text) {
     }
 
     source.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
-    source.querySelectorAll("p, div, li, ul, ol, h1, h2, h3, h4, h5, h6").forEach((node) => {
+    source.querySelectorAll("hr").forEach((node) => node.replaceWith("\n"));
+    // Table-based emails (Paddle, receipts) put each line in its own cell/row.
+    source.querySelectorAll("td, th").forEach((node) => node.append(" "));
+    source.querySelectorAll(
+      "p, div, li, ul, ol, h1, h2, h3, h4, h5, h6, tr, table, blockquote, pre, section, article, header, footer"
+    ).forEach((node) => {
       if (node.lastChild?.nodeType !== Node.TEXT_NODE || !String(node.textContent || "").endsWith("\n")) {
         node.append("\n");
       }
@@ -330,9 +366,18 @@ function extractEmailsFromText(text) {
       /^to:\s/i,
       /^subject:\s/i,
       /^>+\s?/,
-      /^={3,}$/,
-      /^-{3,}$/
+      /^-{2,}\s*original message\s*-{2,}$/i
     ];
+    // A bare "=====" / "-----" line is only a quote boundary when an email
+    // header follows it; otherwise it is a content separator (e.g. Paddle
+    // forwards put the buyer's chat transcript below "==============").
+    const separatorPattern = /^(?:={3,}|-{3,})$/;
+    const quoteHeaderPattern = /^(?:from|sent|to|subject|date):\s/i;
+    const isQuoteSeparator = (index) => {
+      if (!separatorPattern.test(cleanText(lines[index]))) return false;
+      const following = lines.slice(index + 1).map((line) => cleanText(line)).filter(Boolean).slice(0, 3);
+      return following.some((line) => quoteHeaderPattern.test(line));
+    };
 
     let bestCutIndex = lines.length;
 
@@ -360,7 +405,7 @@ function extractEmailsFromText(text) {
           continue;
         }
 
-        if (genericQuotePatterns.some((pattern) => pattern.test(trimmed))) {
+        if (genericQuotePatterns.some((pattern) => pattern.test(trimmed)) || isQuoteSeparator(index)) {
           bestCutIndex = index;
           break;
         }
@@ -371,7 +416,32 @@ function extractEmailsFromText(text) {
     return deduped || normalizedText || text;
   }
 
+  // Znuny answers some article-content requests (e.g. right after the ticket
+  // opens) with a full error page ("An Error Occurred / No such article!").
+  // That page must never be treated as the email body.
+  function isZnunyErrorPage(htmlText) {
+    const text = String(htmlText || "");
+    if (/class=["'][^"']*\bArticleBody\b/i.test(text)) return false;
+    // Only Znuny's own error-screen markers — a customer email may legitimately
+    // contain words like "An Error Occurred".
+    if (/Backend ERROR: OTRS-CGI|Kernel::Modules::AgentTicketArticleContent/.test(text)) return true;
+    return /No such article!/.test(text) && /Core\.Init\.ExecuteInit|Powered by[\s\S]{0,40}OTRS|Znuny/i.test(text);
+  }
+
   async function fetchArticleBodies(rows) {
+    const first = await fetchArticleBodiesOnce(rows);
+    const failed = first.filter((item) => !item.ok);
+    if (!failed.length) return first;
+
+    // Retry failed articles once after a short wait; the article iframes may
+    // have finished loading by then, giving us their real content URLs.
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const retryRows = rows.filter((row) => failed.some((item) => item.article_id === row.article_id));
+    const retried = await fetchArticleBodiesOnce(retryRows);
+    return first.map((item) => (item.ok ? item : retried.find((r) => r.article_id === item.article_id) || item));
+  }
+
+  async function fetchArticleBodiesOnce(rows) {
     const ticketId = getTicketId();
     const iframeUrlMap = getIframeUrlMap();
     const candidates = rows.filter((row) => row.article_id).slice(0, 30);
@@ -403,6 +473,15 @@ function extractEmailsFromText(text) {
           }
 
           const htmlText = await response.text();
+          if (isZnunyErrorPage(htmlText)) {
+            return {
+              article_id: row.article_id,
+              body: "",
+              fetch_url: url,
+              ok: false,
+              error: "znuny-error-page"
+            };
+          }
           return {
             article_id: row.article_id,
             body: parseArticleBodyFromHtml(htmlText),
@@ -447,11 +526,13 @@ function extractEmailsFromText(text) {
         const body = displayBodyMap.get(row.article_id) || "";
         const lines = [];
 
-        if (row.sender) {
-          lines.push(`From: ${row.sender}`);
-        }
+        const role = row.direction === "outgoing" ? "[Our team]" : "[Customer]";
+        lines.push(row.sender ? `${role} From: ${row.sender}` : role);
         if (row.created) {
           lines.push(`Date: ${row.created}`);
+        }
+        if (Array.isArray(row.attachments) && row.attachments.length) {
+          lines.push(`Attachments: ${row.attachments.join(", ")}`);
         }
         if (body) {
           lines.push("");
@@ -470,12 +551,22 @@ function extractEmailsFromText(text) {
   }
 
   async function collectZnunyThreadText() {
-    const rows = collectZnunyRows();
+    const pageTranslated = isPageTranslated();
+    const untranslatedDoc = pageTranslated ? await getUntranslatedTicketDoc() : null;
+    const untranslatedRows = untranslatedDoc ? collectZnunyRows(untranslatedDoc) : [];
+    const rows = untranslatedRows.length ? untranslatedRows : collectZnunyRows();
     const fetchedBodies = await fetchArticleBodies(rows);
-    const ticketSubject = collectZnunySubject().subject;
+    const ticketSubject = collectZnunySubject(untranslatedRows.length ? untranslatedDoc : undefined).subject;
     const pageEmailCandidates = collectPageEmailCandidates();
     const readableThreadText = buildReadableZnunyThread(rows, fetchedBodies);
     const fetchedBodyCount = fetchedBodies.filter((item) => item.body).length;
+    // Some articles never have an HTML body (plain-text mails, system notices,
+    // empty notes) and always "fail". Only the newest customer message is
+    // essential for a draft, so report it separately.
+    const failedIds = fetchedBodies.filter((item) => !item.ok).map((item) => item.article_id);
+    const latestIncoming = rows
+      .filter((row) => row.direction !== "outgoing" && row.article_id)
+      .sort((a, b) => Number(b.number || 0) - Number(a.number || 0))[0];
     const activeArticleBody = fetchedBodies.find((item) => item.body)?.body || "";
 
     return {
@@ -485,6 +576,12 @@ function extractEmailsFromText(text) {
       rowCount: rows.length,
       visiblePanelCount: 0,
       iframeBodyCount: fetchedBodyCount,
+      failedBodyCount: failedIds.length,
+      failedArticleIds: failedIds,
+      latestIncomingFailed: Boolean(latestIncoming && failedIds.includes(latestIncoming.article_id)),
+      pageTranslated,
+      // true when the page is translated and we could NOT get the original text
+      translatedFallback: pageTranslated && !untranslatedRows.length,
       articleBodyLength: activeArticleBody.length,
       rows,
       structured: {
@@ -576,6 +673,11 @@ function extractEmailsFromText(text) {
       znuny_row_count: threadResult.rowCount || 0,
       znuny_visible_panel_count: threadResult.visiblePanelCount || 0,
       znuny_iframe_body_count: threadResult.iframeBodyCount || 0,
+      znuny_failed_body_count: threadResult.failedBodyCount || 0,
+      znuny_failed_article_ids: threadResult.failedArticleIds || [],
+      znuny_latest_incoming_failed: Boolean(threadResult.latestIncomingFailed),
+      page_translated: Boolean(threadResult.pageTranslated),
+      translated_fallback: Boolean(threadResult.translatedFallback),
       znuny_article_body_length: threadResult.articleBodyLength || 0,
       znuny_iframe_ids: (threadResult.structured?.iframe_articles || [])
         .slice(0, 10)
@@ -584,6 +686,10 @@ function extractEmailsFromText(text) {
       standard_responses: []
     };
   }
+
+  // Queue-page spam flagging lives in queue-spam.js.
+
+  // --- Message listener (ticket zoom extraction) ---
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
     if (message?.type !== "EMAIL_COPILOT_EXTRACT") {
@@ -607,7 +713,8 @@ function extractEmailsFromText(text) {
         frame_context: window.top === window ? "top" : "iframe",
         url: location.href,
         title: document.title,
-        subject: subjectResult.subject,
+        // Prefer the subject read from the untranslated page when available.
+        subject: threadResult.structured?.ticket_subject || subjectResult.subject,
         thread_text: threadResult.thread_text,
         thread_structured: threadResult.structured || null,
         debug: collectDebugInfo(subjectResult, threadResult, subjectSelectors, threadSelectors, messageSelectors)

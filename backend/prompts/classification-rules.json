@@ -1,0 +1,35 @@
+{
+  "invoice": {
+    "pattern": "/(invoice|billing info|tax invoice|receipt)/i",
+    "description": "Customer requests invoice or billing document"
+  },
+  "free_credit": {
+    "patterns": {
+      "hasCreditsKeyword": "/\\b(free.?credits?|credits?|cr[eé]ditos?|积分)\\b/i",
+      "hasAtHandle": "/(?<!\\S)@[\\w.]{3,}/i",
+      "hasSocialUrl": "/https?:\\/\\/(?:www\\.)?(?:facebook|twitter|x\\.com|youtube)\\.com\\/\\S+/i"
+    },
+    "logic": "hasAtHandle OR (hasCreditsKeyword AND hasSocialUrl)",
+    "description": "Customer provides social media proof to earn free credits"
+  },
+  "cancel_renewal": {
+    "pattern": "/(cancel.{0,20}(renew|subscri)|cancell?ation.{0,20}(subscri|plan)|do not renew|don.t renew|stop.{0,15}renew|stop.{0,10}bill|unsubscribe)/i",
+    "description": "Customer wants to cancel subscription or stop auto-renewal"
+  },
+  "refund": {
+    "pattern": "/(refund|money back|auto-renew|renewed automatically)/i",
+    "description": "Customer requests a refund or disputes a charge"
+  },
+  "account": {
+    "pattern": "/(license code|registration code|activation code|serial|code does not work|can't activate|cannot activate|new code)/i",
+    "description": "Customer has activation, license code, or account access issue"
+  },
+  "technical": {
+    "pattern": "/(bug|crash|not working|error|failed|program issue|slow|freeze|stuck)/i",
+    "description": "Customer reports software bug, crash, or performance issue"
+  },
+  "general": {
+    "pattern": "none",
+    "description": "Default category when no other rules match"
+  }
+}

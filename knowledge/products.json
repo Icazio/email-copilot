@@ -1,0 +1,82 @@
+{
+  "entries": [
+    {
+      "id": "product-001",
+      "title": "Refund Eligibility and Conditions",
+      "tags": ["refund", "money back", "return", "payment", "charged", "billing", "reimbursement", "退款", "返金", "remboursement", "Rückerstattung", "reembolso"],
+      "content": "Refund windows: 5 days for monthly and yearly subscriptions; 30 days for lifetime/perpetual plans. Eligible cases: duplicate payment, wrong product purchased and reported promptly, registration code not received within 24 hours with no support response, technical issues unresolved after 30 days, auto-renewal charged despite prior cancellation (proof required). Not eligible: request beyond the refund window, no reason provided, customer did not cooperate with troubleshooting, regional or platform price differences, wrong product not reported promptly, dissatisfied with results but no before/after comparison image provided."
+    },
+    {
+      "id": "product-002",
+      "title": "License Activation Failure",
+      "tags": ["license", "activation", "code", "activate", "invalid", "not working", "register", "registration", "激活", "注册码", "ライセンス", "licence", "Lizenz", "licencia"],
+      "content": "License codes are delivered by email after purchase. Common failure causes: typo in the code or email address, wrong product version downloaded, code already used on multiple devices, OS reinstall. Standard troubleshooting: (1) verify customer's purchase email matches system record, (2) check if the code has already been used multiple times, (3) test the code locally to confirm it is valid, (4) confirm customer downloaded the correct product version. Subscription expiry invalidates the code — customer must renew to continue use."
+    },
+    {
+      "id": "product-003",
+      "title": "License Device Reset and Transfer",
+      "tags": ["new computer", "device", "reset", "reinstall", "transfer", "migrate", "machine", "换电脑", "重装系统"],
+      "content": "Each license supports up to 3 devices, but customers are informed it is limited to 1 device. If a customer changes computers or reinstalls their OS, support can manually reset the activation to allow use on a new device. Customer must provide: the purchase email address and operating system details. After the reset, the old device's activation becomes invalid. This is handled manually by the support team upon request."
+    },
+    {
+      "id": "product-004",
+      "title": "Auto-Renewal Subscription",
+      "tags": ["auto-renewal", "renewal", "subscription", "cancel", "recurring", "charge", "automatic", "续订", "自动扣款", "キャンセル", "annuler", "annulation", "kündigen", "Kündigung", "cancelar", "cancelación"],
+      "content": "Subscriptions renew automatically by default. Customers can cancel auto-renewal themselves via the link in their subscription email, or by contacting support. If a customer was charged within the 5-day refund window and wishes to cancel, the standard refund policy applies. Refunding a subscription order also ends that subscription, so when a refund is processed no separate cancellation is needed or mentioned. Cancellation and renewal-related refunds are handled by our support team directly — in the email, say 'we' will handle it; never mention a 'responsible team'."
+    },
+    {
+      "id": "product-005",
+      "title": "Invoice and Receipt",
+      "tags": ["invoice", "receipt", "VAT", "tax", "billing", "company", "official", "发票", "收据", "抬头"],
+      "content": "Invoices and receipts are generated manually by the support agent. For VAT invoices or invoices with company details, the customer must provide: company name, company address, and tax/VAT ID. Support handles this directly and can usually complete it immediately upon receiving the required information."
+    },
+    {
+      "id": "product-006",
+      "title": "Free Credit via Social Media",
+      "tags": ["free credit", "credits", "social media", "youtube", "facebook", "twitter", "review", "proof", "积分", "免费"],
+      "content": "Customers can earn platform credits by posting about AVCLabs products on social media. Eligible platforms: YouTube (video review), Facebook (post or review), Twitter/X (post with screenshot). Required proof: a direct link to the post or a screenshot clearly showing the customer's handle and the content. Credits are added manually by the support team. Each customer is eligible once per platform."
+    },
+    {
+      "id": "product-007",
+      "title": "Technical Issue — Crash or Feature Not Working",
+      "tags": ["crash", "not working", "bug", "error", "freeze", "slow", "quality", "broken", "崩溃", "闪退", "报错", "クラッシュ", "エラー", "plantage", "erreur", "Absturz", "Fehler", "fallo"],
+      "content": "For crashes, software errors, or unexpected behavior, first try common fixes: (1) confirm OS version and GPU model, (2) guide customer to update GPU drivers, (3) check if software is up to date, (4) guide customer to reinstall the software. If unresolved, use the 'crash' template to request log files from the customer. Submit collected logs and the steps already attempted to the technical team via the ticket system. If the issue remains unresolved after 30 days, the customer is eligible for a refund."
+    },
+    {
+      "id": "product-008",
+      "title": "Lost Purchase Email / Order Lookup",
+      "tags": ["lost email", "forgot email", "find order", "order lookup", "purchase email", "找不到邮箱", "找订单"],
+      "content": "If a customer cannot find their purchase email, support can locate the order using the internal support platform. Customer must provide: approximate purchase date, payment method, last 4 digits of the credit card, product name, and purchase amount. Once located, support can assist with account access or resending the license code."
+    },
+    {
+      "id": "product-009",
+      "title": "Email Address Change",
+      "tags": ["change email", "update email", "new email", "old email", "email address", "修改邮箱", "换邮箱"],
+      "content": "Customers who want to change their registered email address should contact support. The agent handles this via the internal support platform. The customer must provide their current registered email address to verify identity before the change can be made."
+    },
+    {
+      "id": "product-010",
+      "title": "Photo Enhancer AI Version 4 Upgrade",
+      "tags": ["ver. 4", "ver 4", "version 4", "v4", "upgrade", "photo enhancer", "update", "升级", "新版本"],
+      "content": "Photo Enhancer AI version 4 must be updated from the official website: the customer downloads the latest installer from avclabs.com and installs it. If a customer has problems after moving to version 4 (e.g. AI engine errors, license not recognized), first make sure they installed version 4 from the official website."
+    },
+    {
+      "id": "product-011",
+      "title": "Video Blur AI — New Installation Method",
+      "tags": ["video blur", "blur", "install", "reinstall", "installer", "mp4", "update", "setup", "重新安装", "安装"],
+      "content": "The latest Video Blur AI version uses a new installation method. The customer should uninstall the old version, then download the installer directly from the official website and reinstall: https://www.avclabs.com/ai_update/video_blur_ai_setup.exe . Reinstalling this way may also resolve MP4 import/export problems."
+    },
+    {
+      "id": "product-012",
+      "title": "AI Model Folder Inside OneDrive",
+      "tags": ["onedrive", "init mosaic ai failure", "ai failure", "model", "models", "ai engine", "sync", "AIEnhancer", "同步", "模型"],
+      "content": "If the AI model folder is inside a OneDrive-synced directory, OneDrive syncing can leave model files empty or truncated on disk, so every AI operation fails (e.g. 'Init mosaic AI failure'). Fix: install the latest version (e.g. Video Blur AI 4.0.2) so the models are downloaded again in full; when asked for the AI file location, choose a local folder that OneDrive does not sync (e.g. C:\\AVCLabs); keep source videos in a local folder too; after it works, the old model folder can be deleted. Without a dedicated GPU, AI processing runs on the CPU and is slower but works."
+    },
+    {
+      "id": "product-013",
+      "title": "Credits Delivered But Customer Says They Do Not Work",
+      "tags": ["credits", "credit", "coins", "not working", "doesn't work", "never worked", "积分", "不能用"],
+      "content": "When the order shows the credits were delivered to the account (e.g. 3000 credits) but the customer says they still do not work, tell them the credits are in their account and ask what exactly happens when they try to use them, with a screenshot of the screen or error message."
+    }
+  ]
+}

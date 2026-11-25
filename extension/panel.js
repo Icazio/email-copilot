@@ -4,37 +4,39 @@ const elements = {
   threadSelectors: document.getElementById("threadSelectors"),
   messageSelectors: document.getElementById("messageSelectors"),
   captureBtn: document.getElementById("captureBtn"),
+  customerEmailInput: document.getElementById("customerEmailInput"),
   orderSearchBtn: document.getElementById("orderSearchBtn"),
   orderSearchDebugBtn: document.getElementById("orderSearchDebugBtn"),
-  analyzeBtn: document.getElementById("analyzeBtn"),
-  generateBtn: document.getElementById("generateBtn"),
   clearBtn: document.getElementById("clearBtn"),
-  refineBtn: document.getElementById("refineBtn"),
-  copyBtn: document.getElementById("copyBtn"),
   subject: document.getElementById("subject"),
   threadText: document.getElementById("threadText"),
   manualLookup: document.getElementById("manualLookup"),
-  replyInstructions: document.getElementById("replyInstructions"),
-  summary: document.getElementById("summary"),
-  fields: document.getElementById("fields"),
-  questions: document.getElementById("questions"),
-  nextStep: document.getElementById("nextStep"),
-  draftReply: document.getElementById("draftReply"),
+  orderResultsDisplay: document.getElementById("orderResultsDisplay"),
+  lookupToggleBtn: document.getElementById("lookupToggleBtn"),
+  chatMessages: document.getElementById("chatMessages"),
+  chatInput: document.getElementById("chatInput"),
+  chatSendBtn: document.getElementById("chatSendBtn"),
+  chatQuickActions: document.getElementById("chatQuickActions"),
+  chatClearBtn: document.getElementById("chatClearBtn"),
+  copyTicketBtn: document.getElementById("copyTicketBtn"),
+  copyEmailBtn: document.getElementById("copyEmailBtn"),
   debugInfo: document.getElementById("debugInfo"),
-  status: document.getElementById("status")
+  status: document.getElementById("status"),
+  autoDraftToggle: document.getElementById("autoDraftToggle")
 };
 
-let lastCategory = null;
-let lastSuggestedTemplateId = null;
 let lastThreadStructured = null;
-let orderSearchContextCache = null;
 let orderSearchContextPromise = null;
-const orderSearchResultCache = new Map();
 let activeOperation = null;
 let autoOrderSearchEnabled = true;
-const ORDERSEARCH_CACHE_TTL_MS = 10 * 60 * 1000;
-const ORDERSEARCH_RESULT_CACHE_TTL_MS = 5 * 60 * 1000;
-const BUTTON_DEFAULT_LABELS = new Map();
+const chatHistory = [];
+
+// Auto-draft: the Znuny ticket currently shown in the panel, and saved panel
+// state per ticket so switching back and forth keeps each conversation.
+let currentTicketId = null;
+const ticketStates = new Map();
+const AUTO_DRAFT_PROMPT = "帮我写一封英文回复邮件。";
+
 const DEFAULTS = {
   backendUrl: "http://localhost:8787",
   subjectSelectors: [
@@ -83,50 +85,9 @@ function setStatus(text) {
   elements.status.textContent = text;
 }
 
-function setButtonsDisabled(disabled) {
-  [
-    elements.captureBtn,
-    elements.orderSearchBtn,
-    elements.orderSearchDebugBtn,
-    elements.analyzeBtn,
-    elements.generateBtn,
-    elements.clearBtn,
-    elements.refineBtn,
-    elements.copyBtn
-  ].forEach((button) => {
-    if (button) {
-      button.disabled = disabled;
-    }
-  });
-}
-
-function ensureButtonLabelsCaptured() {
-  if (BUTTON_DEFAULT_LABELS.size) {
-    return;
-  }
-
-  [
-    elements.captureBtn,
-    elements.orderSearchBtn,
-    elements.orderSearchDebugBtn,
-    elements.analyzeBtn,
-    elements.generateBtn,
-    elements.clearBtn,
-    elements.refineBtn,
-    elements.copyBtn
-  ].forEach((button) => {
-    if (button) {
-      BUTTON_DEFAULT_LABELS.set(button, button.textContent);
-    }
-  });
-}
-
-function restoreButtonLabels() {
-  BUTTON_DEFAULT_LABELS.forEach((label, button) => {
-    if (button) {
-      button.textContent = label;
-    }
-  });
+function setCaptureBusy(disabled) {
+  [elements.captureBtn, elements.orderSearchBtn, elements.orderSearchDebugBtn, elements.clearBtn]
+    .forEach((btn) => { if (btn) btn.disabled = disabled; });
 }
 
 function shouldAutoSearchOrders() {
@@ -138,20 +99,18 @@ async function runWithBusyState(statusText, button, busyLabel, work) {
     throw new Error(`Another action is still running: ${activeOperation}.`);
   }
 
-  ensureButtonLabelsCaptured();
+  const origLabel = button?.textContent;
   activeOperation = statusText;
-  setButtonsDisabled(true);
-  if (button && busyLabel) {
-    button.textContent = busyLabel;
-  }
+  setCaptureBusy(true);
+  if (button && busyLabel) button.textContent = busyLabel;
   setStatus(statusText);
 
   try {
     return await work();
   } finally {
     activeOperation = null;
-    restoreButtonLabels();
-    setButtonsDisabled(false);
+    if (button && origLabel) button.textContent = origLabel;
+    setCaptureBusy(false);
   }
 }
 
@@ -164,8 +123,11 @@ async function loadSettings() {
     "backendUrl",
     "subjectSelectors",
     "threadSelectors",
-    "messageSelectors"
+    "messageSelectors",
+    "autoDraft"
   ]);
+
+  if (elements.autoDraftToggle) elements.autoDraftToggle.checked = stored.autoDraft !== false;
 
   elements.backendUrl.value = stored.backendUrl || DEFAULTS.backendUrl;
   elements.subjectSelectors.value = stored.subjectSelectors || DEFAULTS.subjectSelectors;
@@ -270,11 +232,106 @@ async function captureThread() {
     await saveSettings();
     setStatus("captured");
 
-    const origin = getBaseOrigin(tab.url || "");
-    if (origin) {
-      prefetchOrderSearchContext(origin).catch(() => {});
+    const detectedEmail = getCandidateCustomerEmail();
+    if (detectedEmail) {
+      elements.customerEmailInput.value = detectedEmail;
     }
+
+    return response;
   });
+}
+
+function failedBodyCount(response) {
+  return Number(response?.debug?.znuny_failed_body_count || 0);
+}
+
+function warnIfIncomplete(response) {
+  const failed = failedBodyCount(response);
+  if (failed > 0) {
+    showStatusBanner(`有 ${failed} 封邮件内容没加载出来，草稿可能不完整。请稍后再点 Capture。`);
+  } else if (response?.debug?.translated_fallback) {
+    showStatusBanner("页面开着浏览器翻译，标题和发件人可能是译文。建议关闭网页翻译后再点 Capture。");
+  }
+}
+
+// ── Draft cache (per ticket, survives panel reloads) ─────────────────────────
+// Re-opening a ticket whose thread has not changed restores the last draft
+// instead of asking the model again (≈40% of first drafts were duplicates).
+const DRAFT_CACHE_KEY = "draftCache";
+const DRAFT_CACHE_MAX = 60;
+const DRAFT_CACHE_TTL_MS = 7 * 24 * 3600 * 1000;
+
+function hashText(text) {
+  let h = 0x811c9dc5;
+  const s = String(text || "");
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193) >>> 0;
+  }
+  return h.toString(16);
+}
+
+function threadHash(subject, threadText) {
+  return hashText(`${subject}\n${threadText}`);
+}
+
+async function readDraftCache() {
+  try {
+    const stored = await chrome.storage.local.get(DRAFT_CACHE_KEY);
+    return stored[DRAFT_CACHE_KEY] || {};
+  } catch (_error) {
+    return {};
+  }
+}
+
+async function loadCachedDraft(ticketId, hash) {
+  if (!ticketId) return null;
+  const entry = (await readDraftCache())[ticketId];
+  if (!entry || entry.hash !== hash || !Array.isArray(entry.history) || !entry.history.length) return null;
+  if (Date.now() - entry.savedAt > DRAFT_CACHE_TTL_MS) return null;
+  return entry;
+}
+
+async function saveCachedDraft(ticketId, hash, history) {
+  if (!ticketId || !history.length) return;
+  try {
+    const cache = await readDraftCache();
+    cache[ticketId] = { hash, history: history.slice(-20), savedAt: Date.now() };
+    const keep = Object.entries(cache)
+      .filter(([, v]) => Date.now() - v.savedAt <= DRAFT_CACHE_TTL_MS)
+      .sort((a, b) => b[1].savedAt - a[1].savedAt)
+      .slice(0, DRAFT_CACHE_MAX);
+    await chrome.storage.local.set({ [DRAFT_CACHE_KEY]: Object.fromEntries(keep) });
+  } catch (_error) {
+    // Cache is a convenience; never block drafting on it.
+  }
+}
+
+async function forgetCachedDraft(ticketId) {
+  if (!ticketId) return;
+  try {
+    const cache = await readDraftCache();
+    delete cache[ticketId];
+    await chrome.storage.local.set({ [DRAFT_CACHE_KEY]: cache });
+  } catch (_error) { /* ignore */ }
+}
+
+// ── Non-customer mail check before auto-drafting ─────────────────────────────
+// Reuses the queue's spam classifier (cached per TicketID on the backend, so a
+// ticket already seen in the queue costs no extra AI call).
+async function looksLikeNonCustomerMail(ticketId) {
+  try {
+    const result = await postJson("/spam/classify", {
+      ticket_id: ticketId,
+      sender: getCandidateCustomerEmail() || "",
+      subject: elements.subject.value,
+      preview: elements.threadText.value.slice(0, 800),
+      has_order: /\b(PAID|SUBSCRIPTION_[A-Z_]+|REFUNDED)\b/.test(elements.manualLookup.value)
+    });
+    return result?.verdict === "spam" ? result : null;
+  } catch (_error) {
+    return null; // backend without the spam routes, or offline: just draft
+  }
 }
 
 async function autoSearchOrdersAfterCapture() {
@@ -289,7 +346,7 @@ async function autoSearchOrdersAfterCapture() {
   try {
     await runOrderSearch({ silent: true });
   } catch (_error) {
-    // Ignore auto-search failures; manual search/debug remains available.
+    // Ignore auto-search failures.
   }
 }
 
@@ -313,6 +370,15 @@ function extractLabeledCustomerEmail(text) {
   return match ? match[1] : "";
 }
 
+// Relays and our own addresses are never the customer (Paddle forwards as
+// assist@ / assist+seller@paddle.com with the customer in the quoted body).
+const NON_CUSTOMER_EMAIL = /@(paddle\.com|paddle\.net|avclabs\.com)$|^(no-?reply|mailer-daemon|postmaster)@/i;
+
+function firstCustomerEmail(text) {
+  return (String(text || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [])
+    .find((email) => !NON_CUSTOMER_EMAIL.test(email)) || "";
+}
+
 function getCandidateCustomerEmail() {
   const labeledFromThread = extractLabeledCustomerEmail(elements.threadText.value);
   if (labeledFromThread) {
@@ -326,7 +392,7 @@ function getCandidateCustomerEmail() {
     return labeledFromBodies;
   }
 
-  const structuredCandidate = extractFirstEmail(lastThreadStructured?.customer_email || "");
+  const structuredCandidate = firstCustomerEmail(lastThreadStructured?.customer_email || "");
   if (structuredCandidate) {
     return structuredCandidate;
   }
@@ -335,14 +401,14 @@ function getCandidateCustomerEmail() {
     ? lastThreadStructured.customer_email_candidates
     : [];
   const pageCandidate = candidateList
-    .map((item) => extractFirstEmail(item))
+    .map((item) => firstCustomerEmail(item))
     .find(Boolean);
   if (pageCandidate) {
     return pageCandidate;
   }
 
   const articleSenderEmail = lastThreadStructured?.articles
-    ?.map((item) => extractFirstEmail(item?.sender || ""))
+    ?.map((item) => firstCustomerEmail(item?.sender || ""))
     .find(Boolean);
 
   if (articleSenderEmail) {
@@ -350,13 +416,13 @@ function getCandidateCustomerEmail() {
   }
 
   const articleBodyEmail = lastThreadStructured?.articles
-    ?.map((item) => extractFirstEmail(item?.body || ""))
+    ?.map((item) => firstCustomerEmail(item?.body || ""))
     .find(Boolean);
   if (articleBodyEmail) {
     return articleBodyEmail;
   }
 
-  return extractFirstEmail(elements.threadText.value);
+  return firstCustomerEmail(elements.threadText.value);
 }
 
 function parseOrderSearchForms(doc) {
@@ -385,41 +451,6 @@ function buildAbsoluteUrl(origin, action) {
   }
 }
 
-function isValidOrderSearchCache(origin) {
-  return Boolean(
-    orderSearchContextCache &&
-    orderSearchContextCache.origin === origin &&
-    orderSearchContextCache.payloadBase?.ChallengeToken &&
-    Date.now() - orderSearchContextCache.fetchedAt < ORDERSEARCH_CACHE_TTL_MS
-  );
-}
-
-function buildOrderSearchResultCacheKey(origin, customerEmail) {
-  return `${origin}::${String(customerEmail || "").toLowerCase()}`;
-}
-
-function getCachedOrderSearchResult(origin, customerEmail) {
-  const key = buildOrderSearchResultCacheKey(origin, customerEmail);
-  const cached = orderSearchResultCache.get(key);
-  if (!cached) {
-    return null;
-  }
-
-  if (Date.now() - cached.cachedAt > ORDERSEARCH_RESULT_CACHE_TTL_MS) {
-    orderSearchResultCache.delete(key);
-    return null;
-  }
-
-  return cached;
-}
-
-function setCachedOrderSearchResult(origin, customerEmail, value) {
-  orderSearchResultCache.set(buildOrderSearchResultCacheKey(origin, customerEmail), {
-    ...value,
-    cachedAt: Date.now()
-  });
-}
-
 function pickOrderSearchForm(doc) {
   return Array.from(doc.querySelectorAll("form")).find((form) => {
     const fieldNames = Array.from(form.querySelectorAll("input, select, textarea"))
@@ -430,13 +461,8 @@ function pickOrderSearchForm(doc) {
   }) || null;
 }
 
-async function fetchOrderSearchContext(origin, options = {}) {
-  const { forceRefresh = false } = options;
-  if (!forceRefresh && isValidOrderSearchCache(origin)) {
-    return orderSearchContextCache;
-  }
-
-  if (!forceRefresh && orderSearchContextPromise) {
+async function fetchOrderSearchContext(origin) {
+  if (orderSearchContextPromise) {
     return orderSearchContextPromise;
   }
 
@@ -463,9 +489,8 @@ async function fetchOrderSearchContext(origin, options = {}) {
     payloadBase.Action = payloadBase.Action || "AgentOrderSearch";
     payloadBase.Subaction = payloadBase.Subaction || "Search";
 
-    orderSearchContextCache = {
+    return {
       origin,
-      fetchedAt: Date.now(),
       targetUrl,
       submitUrl: buildAbsoluteUrl(origin, orderSearchForm.getAttribute("action")),
       payloadBase,
@@ -479,22 +504,12 @@ async function fetchOrderSearchContext(origin, options = {}) {
         parse_ms: Math.round(performance.now() - responseLoadedAt)
       }
     };
-
-    return orderSearchContextCache;
   })();
 
   try {
     return await orderSearchContextPromise;
   } finally {
     orderSearchContextPromise = null;
-  }
-}
-
-async function prefetchOrderSearchContext(origin) {
-  try {
-    await fetchOrderSearchContext(origin);
-  } catch (_error) {
-    // Best-effort warm cache only.
   }
 }
 
@@ -626,6 +641,15 @@ function summarizeDetailsBlocks(doc) {
   return blocks.slice(0, 4);
 }
 
+function extractTextWithLineBreaks(element) {
+  const clone = element.cloneNode(true);
+  clone.querySelectorAll("br").forEach((br) => br.replaceWith("\n"));
+  clone.querySelectorAll("p, div, li, td, tr, h1, h2, h3, h4, h5, h6").forEach((el) => {
+    if (!el.textContent.endsWith("\n")) el.append("\n");
+  });
+  return clone.textContent.replace(/[ \t]+/g, " ").replace(/\n{3,}/g, "\n\n").trim();
+}
+
 function getPrimaryDetailText(doc) {
   const detailHeading = Array.from(doc.querySelectorAll("h1, h2, h3, legend, strong, b"))
     .find((node) => /details of order/i.test(node.textContent || ""));
@@ -638,7 +662,7 @@ function getPrimaryDetailText(doc) {
   let cursor = detailHeading.parentElement;
   let hops = 0;
   while (cursor && hops < 4) {
-    const text = (cursor.textContent || "").replace(/\s+/g, " ").trim();
+    const text = extractTextWithLineBreaks(cursor);
     if (text.length > bestText.length) {
       bestText = text;
     }
@@ -646,7 +670,13 @@ function getPrimaryDetailText(doc) {
     hops += 1;
   }
 
-  return bestText.slice(0, 12000);
+  const afterHeading = bestText
+    .replace(/^[\s\S]*?Details of Order\s*/i, "")
+    .trimStart()
+    .replace(/\n{2,}/g, "\n")
+    .replace(/(^\s*\d{4}-\d{2}-\d{2}\s.+$)/gm, "$1\n\n")
+    .trimEnd();
+  return afterHeading.slice(0, 12000);
 }
 
 function parseDefinitionPairs(doc) {
@@ -701,10 +731,6 @@ function escapeRegExp(text) {
   return String(text || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function safeMatchValue(match, index) {
-  return String(match?.[index] || "").trim();
-}
-
 function buildRawOrderEntry(row) {
   const leading = row.Customer ? `${row.Customer} <${row.Email}>` : `<${row.Email}>`;
   return `${leading} ${row.Country} [${row.Product}]\n${row["Purchase Date"]} - ${row.Provider} - ${row["Order ID"]} - ${row["License Key"]} - ${row.Amount} - ${row.Status}`.trim();
@@ -712,28 +738,34 @@ function buildRawOrderEntry(row) {
 
 function parseOrderRowsFromDetailBlocks(detailBlocks, customerEmail) {
   const emailPattern = escapeRegExp(customerEmail);
-  const entryRegex = new RegExp(
-    `(?:([^<\\n]+?)\\s*)?<${emailPattern}>\\s+([A-Z]{2})\\s+\\[([^\\]]+)\\]\\s+([\\s\\S]*?)(?=(?:(?:[^<\\n]+?)\\s*)?<${emailPattern}>\\s+[A-Z]{2}\\s+\\[|$)`,
-    "gi"
+  const headerRegex = new RegExp(
+    `^(?:(.+?)\\s+)?<${emailPattern}>\\s*(?:([A-Z]{2})\\s+)?\\[([^\\]]+)\\]\\s*$`,
+    "i"
   );
 
   for (const block of detailBlocks) {
-    const text = String(block?.text_full || block?.text_preview || "")
-      .replace(/\s+/g, " ")
-      .replace(/^.*?Details of Order\s*/i, "")
-      .trim();
+    const lines = String(block?.text_full || block?.text_preview || "")
+      .replace(/[ \t]+/g, " ")
+      .split(/\n/)
+      .map((l) => l.trim())
+      .filter(Boolean);
 
-    const matches = Array.from(text.matchAll(entryRegex));
-    if (!matches.length) {
-      continue;
-    }
+    const results = [];
+    for (let i = 0; i < lines.length; i++) {
+      const headerMatch = lines[i].match(headerRegex);
+      if (!headerMatch) continue;
 
-    return matches.map((match) => {
-      const customer = safeMatchValue(match, 1);
-      const country = safeMatchValue(match, 2);
-      const product = safeMatchValue(match, 3);
-      const tail = safeMatchValue(match, 4).replace(/\s+/g, " ").trim();
-      const parts = tail.split(/\s+-\s+/).map((item) => item.trim()).filter(Boolean);
+      const customer = (headerMatch[1] || "").trim();
+      const country = headerMatch[2] || "";
+      const product = headerMatch[3];
+      const dataLine = lines[i + 1] || "";
+      // License key may be empty ("82765308 - - USD56.83"), so match fields by position.
+      const detail = dataLine.match(
+        /^(\d{4}-\d{2}-\d{2}(?:\s+\d{2}:\d{2}(?::\d{2})?)?)\s*-\s*(\S+)\s*-\s*(\S*)\s*-\s*(.*?)\s*-\s*([A-Z]{3}\s?[\d.,]+)\s*-\s*([A-Z_]+)\s*$/
+      );
+      const parts = detail
+        ? detail.slice(1).map((p) => (p === "-" ? "" : p.trim()))
+        : dataLine.split(/\s+-\s+/).map((p) => p.trim());
 
       const row = {
         Customer: customer,
@@ -745,15 +777,86 @@ function parseOrderRowsFromDetailBlocks(detailBlocks, customerEmail) {
         "Order ID": parts[2] || "",
         "License Key": parts[3] || "",
         Amount: parts[4] || "",
-        Status: parts.slice(5).join(" - ") || parts[5] || ""
+        Status: parts[5] || ""
       };
 
-      row["Raw Entry"] = buildRawOrderEntry(row);
-      return row;
-    }).filter((row) => row.Product || row["Order ID"] || row["License Key"] || row.Amount);
+      if (row.Product || row["Order ID"] || row.Amount) {
+        row["Raw Entry"] = buildRawOrderEntry(row);
+        results.push(row);
+        i++;
+      }
+    }
+
+    if (results.length) return results;
   }
 
   return [];
+}
+
+function renderOrderResults(rows, customerEmail) {
+  window.ecLastOrderRows = Array.isArray(rows) ? rows : []; // read by panel-actions.js (退款记录)
+  const display = elements.orderResultsDisplay;
+  const textarea = elements.manualLookup;
+  const toggle = elements.lookupToggleBtn;
+  if (!display) return;
+
+  if (!rows.length) {
+    display.innerHTML = `<div class="order-empty">未找到订单记录</div>`;
+  } else {
+    const customerName = rows.find((r) => r.Customer)?.Customer || "";
+    const headerText = customerName
+      ? `${customerName} · ${customerEmail} · ${rows.length} 条订单`
+      : `${customerEmail} · ${rows.length} 条订单`;
+
+    const cards = rows.slice(0, 10).map((row) => {
+      const status = row.Status || "";
+      const statusClass = /PAID/i.test(status) ? "status-paid"
+        : /CANCEL/i.test(status) ? "status-cancelled"
+        : /REFUND/i.test(status) ? "status-other"
+        : "status-other";
+      const cardClass = /PAID/i.test(status) ? "card-paid"
+        : /CANCEL/i.test(status) ? "card-cancel"
+        : /REFUND/i.test(status) ? "card-refund"
+        : "";
+      const date = (row["Purchase Date"] || "").slice(0, 10);
+      const meta = [date, row.Provider, row.Amount, row["Order ID"]]
+        .filter(Boolean).join(" · ");
+
+      const licenseField = row["License Key"] ? `
+        <div class="order-field">
+          <span class="order-field-label">License</span>
+          <span class="order-field-value" title="${row["License Key"]}">${row["License Key"]}</span>
+          <button class="copy-chip" data-copy="${row["License Key"]}">Copy</button>
+          <button class="lic-check-btn" data-code="${escapeHtml(row["License Key"]).replace(/"/g, "&quot;")}" data-product="${escapeHtml(row.Product || "").replace(/"/g, "&quot;")}" title="在技术支持系统查询激活情况 / 重置激活次数">激活</button>
+        </div>` : "";
+
+      return `
+        <div class="order-card ${cardClass}">
+          <div class="order-card-top">
+            <div class="order-product">${row.Product || "?"}</div>
+            <span class="status-badge ${statusClass}">${status || "?"}</span>
+          </div>
+          ${meta ? `<div class="order-meta">${meta}</div>` : ""}
+          ${licenseField}
+        </div>`;
+    });
+
+    const collapseBtn = cards.length > 1
+      ? `<button class="order-collapse-btn">收起</button>`
+      : "";
+    const extraHtml = cards.length > 1
+      ? `<div class="order-extra-cards">${cards.slice(1).join("")}</div>`
+      : "";
+
+    display.innerHTML = `<div class="order-customer-line"><span>${headerText}</span>${collapseBtn}</div>${cards[0]}${extraHtml}`;
+  }
+
+  display.style.display = "";
+  textarea.style.display = "none";
+  if (toggle) {
+    toggle.style.display = "";
+    toggle.textContent = "原始数据";
+  }
 }
 
 function formatOrderLookupResult(customerEmail, rows) {
@@ -761,29 +864,23 @@ function formatOrderLookupResult(customerEmail, rows) {
     return `Customer email: ${customerEmail}\nOrder search: no results found`;
   }
 
-  const lines = [
-    `Customer email: ${customerEmail}`,
-    `Order search results: ${rows.length}`
-  ];
+  const customerName = rows.find((r) => r.Customer)?.Customer || "";
+  const header = customerName ? `${customerName} <${customerEmail}>` : customerEmail;
+  const lines = [`Customer: ${header}`, `Orders: ${rows.length}`, ""];
 
   rows.slice(0, 10).forEach((row, index) => {
+    const date = (row["Purchase Date"] || "").slice(0, 10);
+    const statusPart = [date, row.Provider, row.Amount, row.Status].filter(Boolean).join("  ");
+    lines.push(`[${index + 1}] ${row.Product || "?"}`);
+    if (statusPart) lines.push(`    ${statusPart}`);
+    if (row["Order ID"]) lines.push(`    Order: ${row["Order ID"]}`);
+    if (row["License Key"]) lines.push(`    License: ${row["License Key"]}`);
+    if (row["Raw Entry"]) lines.push(`    ---\n    ${row["Raw Entry"].replace(/\n/g, "\n    ")}`);
     lines.push("");
-    lines.push(`Result ${index + 1}:`);
-    Object.entries(row).forEach(([key, value]) => {
-      if (value) {
-        if (key === "Raw Entry") {
-          lines.push(`${key}:`);
-          lines.push(String(value));
-        } else {
-          lines.push(`${key}: ${value}`);
-        }
-      }
-    });
   });
 
   if (rows.length > 10) {
-    lines.push("");
-    lines.push(`Additional results omitted: ${rows.length - 10}`);
+    lines.push(`(${rows.length - 10} more results omitted)`);
   }
 
   return lines.join("\n");
@@ -796,175 +893,139 @@ async function runOrderSearch(options = {}) {
     includeDebug ? elements.orderSearchDebugBtn : elements.orderSearchBtn,
     includeDebug ? "Debugging..." : "Searching...",
     async () => {
-    const tab = await getActiveTab();
-    if (!tab?.id || !tab.url) {
-      throw new Error("No active tab found.");
-    }
-
-    const origin = getBaseOrigin(tab.url);
-    if (!origin) {
-      throw new Error("Unable to determine current origin.");
-    }
-
-    const customerEmail = getCandidateCustomerEmail();
-    if (!customerEmail) {
-      throw new Error("No customer email found in the current thread.");
-    }
-    const totalStartedAt = performance.now();
-
-    const cachedResult = getCachedOrderSearchResult(origin, customerEmail);
-    if (cachedResult && !includeDebug) {
-      elements.manualLookup.value = cachedResult.manualLookup;
-      if (!silent) {
-        elements.debugInfo.textContent = JSON.stringify(
-          {
-            ordersearch: true,
-            cache_hit: true,
-            result_cache_hit: true,
-            cached_at: new Date(cachedResult.cachedAt).toISOString(),
-            timings: {
-              total_ms: 0,
-              cache_return_ms: Math.round(performance.now() - totalStartedAt)
-            },
-            candidate_customer_email: customerEmail,
-            search_title: cachedResult.searchTitle || "",
-            result_count: cachedResult.resultCount || 0
-          },
-          null,
-          2
-        );
+      const tab = await getActiveTab();
+      if (!tab?.id || !tab.url) {
+        throw new Error("No active tab found.");
       }
-      setStatus("ordersearch-ready");
-      return;
-    }
 
-    const usedCachedContext = isValidOrderSearchCache(origin);
-    let context = await fetchOrderSearchContext(origin);
-    const parser = new DOMParser();
-    const payload = { ...context.payloadBase };
-    payload.Email = customerEmail;
-    const postStartedAt = performance.now();
-    let submitResponse = await fetch(context.submitUrl, {
-      method: "POST",
-      credentials: "include",
-      headers: {
-        "Content-Type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams(payload).toString()
-    });
+      const origin = getBaseOrigin(tab.url);
+      if (!origin) {
+        throw new Error("Unable to determine current origin.");
+      }
 
-    let resultHtml = await submitResponse.text();
-    const postLoadedAt = performance.now();
-    let resultDoc = parser.parseFromString(resultHtml, "text/html");
+      const customerEmail = elements.customerEmailInput.value.trim() || getCandidateCustomerEmail();
+      if (!customerEmail) {
+        throw new Error("No customer email found. Please enter the customer email manually.");
+      }
+      const totalStartedAt = performance.now();
 
-    if (/login\s*-\s*znuny/i.test(resultDoc.title || "")) {
-      context = await fetchOrderSearchContext(origin, { forceRefresh: true });
-      const retryPayload = { ...context.payloadBase, Email: customerEmail };
-      submitResponse = await fetch(context.submitUrl, {
+      let context = await fetchOrderSearchContext(origin);
+      const parser = new DOMParser();
+      const payload = { ...context.payloadBase };
+      payload.Email = customerEmail;
+      const postStartedAt = performance.now();
+      let submitResponse = await fetch(context.submitUrl, {
         method: "POST",
         credentials: "include",
         headers: {
           "Content-Type": "application/x-www-form-urlencoded"
         },
-        body: new URLSearchParams(retryPayload).toString()
+        body: new URLSearchParams(payload).toString()
       });
-      resultHtml = await submitResponse.text();
-      resultDoc = parser.parseFromString(resultHtml, "text/html");
-    }
 
-    const parseStartedAt = performance.now();
-    const detailText = getPrimaryDetailText(resultDoc);
-    const textBlockRows = parseOrderRowsFromDetailBlocks(
-      detailText ? [{ text_full: detailText }] : [],
-      customerEmail
-    );
-    let orderRows = textBlockRows;
+      let resultHtml = await submitResponse.text();
+      const postLoadedAt = performance.now();
+      let resultDoc = parser.parseFromString(resultHtml, "text/html");
 
-    if (!orderRows.length) {
-      const rawOrderRows = parseOrderRows(resultDoc);
-      const definitionPairs = parseDefinitionPairs(resultDoc);
-      orderRows = rawOrderRows.length
-        ? rawOrderRows
-        : normalizeOrderRows(rawOrderRows, definitionPairs);
-    }
-    const parseFinishedAt = performance.now();
-
-    elements.manualLookup.value = formatOrderLookupResult(customerEmail, orderRows);
-    setCachedOrderSearchResult(origin, customerEmail, {
-      manualLookup: elements.manualLookup.value,
-      searchTitle: resultDoc.title || "",
-      resultCount: orderRows.length
-    });
-
-    if (includeDebug) {
-      const rawOrderRows = parseOrderRows(resultDoc);
-      const resultHeadings = getHeadings(resultDoc);
-      const resultForms = parseOrderSearchForms(resultDoc);
-      const resultTables = summarizeTables(resultDoc);
-      const detailBlocks = summarizeDetailsBlocks(resultDoc);
-      const definitionPairs = parseDefinitionPairs(resultDoc);
-
-      elements.debugInfo.textContent = JSON.stringify(
-        {
-          ordersearch_debug: true,
-          cache_hit: usedCachedContext,
-          request_url: context.targetUrl,
-          submit_url: context.submitUrl,
-          cached_at: new Date(context.fetchedAt).toISOString(),
-          timings: {
-            form_request_ms: context.timings?.request_ms || 0,
-            form_parse_ms: context.timings?.parse_ms || 0,
-            post_request_ms: Math.round(postLoadedAt - postStartedAt),
-            result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
-            total_ms: Math.round(performance.now() - totalStartedAt)
+      if (/login\s*-\s*znuny/i.test(resultDoc.title || "")) {
+        context = await fetchOrderSearchContext(origin);
+        const retryPayload = { ...context.payloadBase, Email: customerEmail };
+        submitResponse = await fetch(context.submitUrl, {
+          method: "POST",
+          credentials: "include",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded"
           },
-          response_status: context.responseStatus,
-          response_title: context.responseTitle,
-          search_status: submitResponse.status,
-          search_title: resultDoc.title || "",
-          candidate_customer_email: customerEmail,
-          headings: context.headings,
-          result_headings: resultHeadings,
-          form_count: context.formCount,
-          forms: context.forms,
-          submit_payload_keys: Object.keys(payload),
-          result_form_count: resultForms.length,
-          detail_text_length: detailText.length,
-          result_tables: resultTables,
-          detail_blocks: detailBlocks,
-          definition_pairs_preview: definitionPairs.slice(0, 15),
-          raw_result_count: rawOrderRows.length,
-          text_block_result_count: textBlockRows.length,
-          result_count: orderRows.length,
-          result_preview: orderRows.slice(0, 5)
-        },
-        null,
-        2
-      );
-    } else if (!silent) {
-      elements.debugInfo.textContent = JSON.stringify(
-        {
-          ordersearch: true,
-          cache_hit: usedCachedContext,
-          result_cache_hit: false,
-          cached_at: new Date(context.fetchedAt).toISOString(),
-          timings: {
-            form_request_ms: context.timings?.request_ms || 0,
-            form_parse_ms: context.timings?.parse_ms || 0,
-            post_request_ms: Math.round(postLoadedAt - postStartedAt),
-            result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
-            total_ms: Math.round(performance.now() - totalStartedAt)
-          },
-          candidate_customer_email: customerEmail,
-          search_title: resultDoc.title || "",
-          result_count: orderRows.length
-        },
-        null,
-        2
-      );
-    }
+          body: new URLSearchParams(retryPayload).toString()
+        });
+        resultHtml = await submitResponse.text();
+        resultDoc = parser.parseFromString(resultHtml, "text/html");
+      }
 
-    setStatus(includeDebug ? "ordersearch-debug-ready" : "ordersearch-ready");
+      const parseStartedAt = performance.now();
+      const detailText = getPrimaryDetailText(resultDoc);
+      const textBlockRows = parseOrderRowsFromDetailBlocks(
+        detailText ? [{ text_full: detailText }] : [],
+        customerEmail
+      );
+      let orderRows = textBlockRows;
+
+      if (!orderRows.length) {
+        const rawOrderRows = parseOrderRows(resultDoc);
+        const definitionPairs = parseDefinitionPairs(resultDoc);
+        orderRows = rawOrderRows.length
+          ? rawOrderRows
+          : normalizeOrderRows(rawOrderRows, definitionPairs);
+      }
+      const parseFinishedAt = performance.now();
+
+      elements.manualLookup.value = detailText || formatOrderLookupResult(customerEmail, orderRows);
+      renderOrderResults(orderRows, customerEmail);
+
+      if (includeDebug) {
+        const rawOrderRows = parseOrderRows(resultDoc);
+        const resultHeadings = getHeadings(resultDoc);
+        const resultForms = parseOrderSearchForms(resultDoc);
+        const resultTables = summarizeTables(resultDoc);
+        const detailBlocks = summarizeDetailsBlocks(resultDoc);
+        const definitionPairs = parseDefinitionPairs(resultDoc);
+
+        elements.debugInfo.textContent = JSON.stringify(
+          {
+            ordersearch_debug: true,
+            request_url: context.targetUrl,
+            submit_url: context.submitUrl,
+            timings: {
+              form_request_ms: context.timings?.request_ms || 0,
+              form_parse_ms: context.timings?.parse_ms || 0,
+              post_request_ms: Math.round(postLoadedAt - postStartedAt),
+              result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
+              total_ms: Math.round(performance.now() - totalStartedAt)
+            },
+            response_status: context.responseStatus,
+            response_title: context.responseTitle,
+            search_status: submitResponse.status,
+            search_title: resultDoc.title || "",
+            candidate_customer_email: customerEmail,
+            headings: context.headings,
+            result_headings: resultHeadings,
+            form_count: context.formCount,
+            forms: context.forms,
+            submit_payload_keys: Object.keys(payload),
+            result_form_count: resultForms.length,
+            detail_text_length: detailText.length,
+            result_tables: resultTables,
+            detail_blocks: detailBlocks,
+            definition_pairs_preview: definitionPairs.slice(0, 15),
+            raw_result_count: rawOrderRows.length,
+            text_block_result_count: textBlockRows.length,
+            result_count: orderRows.length,
+            result_preview: orderRows.slice(0, 5)
+          },
+          null,
+          2
+        );
+      } else if (!silent) {
+        elements.debugInfo.textContent = JSON.stringify(
+          {
+            ordersearch: true,
+            timings: {
+              form_request_ms: context.timings?.request_ms || 0,
+              form_parse_ms: context.timings?.parse_ms || 0,
+              post_request_ms: Math.round(postLoadedAt - postStartedAt),
+              result_parse_ms: Math.round(parseFinishedAt - parseStartedAt),
+              total_ms: Math.round(performance.now() - totalStartedAt)
+            },
+            candidate_customer_email: customerEmail,
+            search_title: resultDoc.title || "",
+            result_count: orderRows.length
+          },
+          null,
+          2
+        );
+      }
+
+      setStatus(includeDebug ? "ordersearch-debug-ready" : "ordersearch-ready");
     }
   );
 }
@@ -990,114 +1051,550 @@ async function postJson(path, payload) {
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(`${response.status} ${text}`);
+    let message = `${response.status} ${text}`;
+    try {
+      const parsed = JSON.parse(text);
+      if (parsed && parsed.error && parsed.error !== "Internal server error") message = parsed.error;
+    } catch (_e) { /* keep raw text */ }
+    throw new Error(message);
   }
 
   return response.json();
 }
 
-function renderAnalysis(data) {
-  lastCategory = data.category || null;
-  lastSuggestedTemplateId = data.suggested_template_id || data.template_id || null;
-  elements.summary.textContent = data.summary || "";
-  elements.fields.textContent = JSON.stringify(data.extracted_fields || {}, null, 2);
-  elements.questions.textContent = (data.clarification_questions || []).map((item) => `- ${item}`).join("\n");
-  elements.nextStep.textContent = data.next_step || "";
+// ── Chat ─────────────────────────────────────────────────────────────────────
+
+function escapeHtml(text) {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;");
 }
 
-function renderDraft(data) {
-  renderAnalysis(data);
-  elements.draftReply.value = data.draft_reply || "";
+function applyInlineMarkdown(text) {
+  return text
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/\*(.+?)\*/g, "<em>$1</em>")
+    .replace(/`([^`]+)`/g, "<code>$1</code>");
 }
 
-async function analyzeThread() {
-  return runWithBusyState("analyzing", elements.analyzeBtn, "Analyzing...", async () => {
-    const data = await postJson("/analyze-thread", {
-      subject: elements.subject.value,
-      thread_text: elements.threadText.value,
-      thread_structured: lastThreadStructured,
-      language: "en"
+function renderMarkdown(raw) {
+  const lines = escapeHtml(raw).split("\n");
+  const out = [];
+  let inList = false;
+
+  for (const line of lines) {
+    const trimmed = line.trim();
+    if (/^[-*]\s+/.test(trimmed)) {
+      if (!inList) { out.push("<ul>"); inList = true; }
+      out.push(`<li>${applyInlineMarkdown(trimmed.replace(/^[-*]\s+/, ""))}</li>`);
+    } else {
+      if (inList) { out.push("</ul>"); inList = false; }
+      if (trimmed === "") {
+        out.push("<br>");
+      } else if (/^#{1,3}\s+/.test(trimmed)) {
+        out.push(`<strong>${applyInlineMarkdown(trimmed.replace(/^#{1,3}\s+/, ""))}</strong><br>`);
+      } else {
+        out.push(applyInlineMarkdown(trimmed) + "<br>");
+      }
+    }
+  }
+  if (inList) out.push("</ul>");
+  return out.join("");
+}
+
+// Drafts may end with "---NOTES---" + short notes for the agent. Older-style
+// replies used "---" followed by "给客服的说明". Split so Copy takes only the email.
+// Drafts may also carry "---ZH---" + a Chinese translation of the email.
+// Both extra sections are shown separately and excluded from Copy.
+function splitDraftAndNotes(content) {
+  const text = String(content || "");
+  const markers = [
+    { key: "zh", re: /\n?[ \t]*-{3}\s*ZH\s*-{3}[ \t]*\n?/i },
+    { key: "notes", re: /\n?[ \t]*-{3}\s*NOTES\s*-{3}[ \t]*\n?|\n\s*-{3,}\s*\n+\s*(?=给客服的说明)/i }
+  ]
+    .map(({ key, re }) => {
+      const m = text.match(re);
+      return m ? { key, start: m.index, end: m.index + m[0].length } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+
+  const result = { main: text, zh: "", notes: "" };
+  if (!markers.length) return result;
+  result.main = text.slice(0, markers[0].start).trimEnd();
+  markers.forEach((m, i) => {
+    const next = markers[i + 1];
+    result[m.key] = text.slice(m.end, next ? next.start : text.length).trim();
+  });
+  return result;
+}
+
+function appendChatMessage(role, content) {
+  const wrap = document.createElement("div");
+  wrap.className = `chat-message chat-message-${role}`;
+  const { main, zh, notes } = role === "assistant" ? splitDraftAndNotes(content) : { main: content, zh: "", notes: "" };
+
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble";
+  if (role === "assistant") {
+    bubble.innerHTML = renderMarkdown(main);
+  } else {
+    bubble.textContent = content;
+  }
+  wrap.appendChild(bubble);
+
+  if (zh) {
+    const zhEl = document.createElement("div");
+    zhEl.className = "chat-translation";
+    zhEl.textContent = zh;
+    wrap.appendChild(zhEl);
+  }
+
+  if (notes) {
+    const notesEl = document.createElement("div");
+    notesEl.className = "chat-notes";
+    notesEl.innerHTML = renderMarkdown(notes);
+    wrap.appendChild(notesEl);
+  }
+
+  if (role === "assistant") {
+    const copyBtn = document.createElement("button");
+    copyBtn.className = "chat-copy-btn";
+    copyBtn.textContent = "Copy";
+    copyBtn.title = zh || notes ? "只复制英文邮件（不含中文翻译和备注）" : "Copy";
+    copyBtn.addEventListener("click", () => {
+      navigator.clipboard.writeText(main).then(() => {
+        copyBtn.textContent = "✓";
+        setTimeout(() => { copyBtn.textContent = "Copy"; }, 1500);
+      });
     });
-    renderAnalysis(data);
-    setStatus("analyzed");
-  });
+    wrap.appendChild(copyBtn);
+    wrap.dataset.draft = main; // read by panel-actions.js ("填入回复框")
+  }
+
+  elements.chatMessages.appendChild(wrap);
+  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  return wrap;
 }
 
-async function generateDraft() {
-  return runWithBusyState("drafting", elements.generateBtn, "Generating...", async () => {
-    const data = await postJson("/generate-draft", {
-      category: lastCategory,
-      subject: elements.subject.value,
-      thread_text: elements.threadText.value,
-      thread_structured: lastThreadStructured,
-      manual_notes: elements.replyInstructions.value,
-      template_ids: lastSuggestedTemplateId ? [lastSuggestedTemplateId] : []
+function appendChatThinking() {
+  const wrap = document.createElement("div");
+  wrap.className = "chat-message chat-message-assistant";
+  const bubble = document.createElement("div");
+  bubble.className = "chat-bubble chat-thinking";
+  bubble.textContent = "Thinking…";
+  wrap.appendChild(bubble);
+  elements.chatMessages.appendChild(wrap);
+  elements.chatMessages.scrollTop = elements.chatMessages.scrollHeight;
+  return wrap;
+}
+
+async function sendChatMessage(userText) {
+  const text = userText.trim();
+  if (!text) return;
+  if (activeOperation) return;
+
+  appendChatMessage("user", text);
+  chatHistory.push({ role: "user", content: text });
+  elements.chatInput.value = "";
+  elements.chatQuickActions.style.display = "none";
+
+  const thinkingEl = appendChatThinking();
+  elements.chatSendBtn.disabled = true;
+  setStatus("thinking…");
+  const ticketAtStart = currentTicketId;
+  const hashAtStart = threadHash(elements.subject.value, elements.threadText.value);
+
+  try {
+    const data = await postJson("/chat", {
+      messages: chatHistory.slice(-20),
+      thread_context: {
+        subject: elements.subject.value,
+        thread_text: elements.threadText.value,
+        thread_structured: lastThreadStructured
+      },
+      order_context: elements.manualLookup.value
     });
-    renderDraft(data);
-    setStatus("draft-ready");
-  });
-}
 
-async function refineDraft() {
-  return runWithBusyState("refining", elements.refineBtn, "Refining...", async () => {
-    const data = await postJson("/refine-draft", {
-      category: lastCategory,
-      thread_text: elements.threadText.value,
-      thread_structured: lastThreadStructured,
-      manual_lookup_result: elements.manualLookup.value,
-      previous_draft: elements.draftReply.value,
-      manual_notes: elements.replyInstructions.value,
-      template_ids: lastSuggestedTemplateId ? [lastSuggestedTemplateId] : []
-    });
-    renderDraft(data);
-    setStatus("refined");
-  });
-}
-
-async function copyDraft() {
-  return runWithBusyState("copying", elements.copyBtn, "Copying...", async () => {
-    await navigator.clipboard.writeText(elements.draftReply.value);
-    setStatus("copied");
-  });
+    thinkingEl.remove();
+    const reply = data.reply || "(no response)";
+    if (ticketAtStart !== currentTicketId) {
+      // The agent switched tickets while we waited: file the reply under its own ticket.
+      const saved = ticketStates.get(ticketAtStart);
+      if (saved) {
+        saved.history.push({ role: "assistant", content: reply });
+        saveCachedDraft(ticketAtStart, hashAtStart, saved.history);
+      }
+      return;
+    }
+    chatHistory.push({ role: "assistant", content: reply });
+    appendChatMessage("assistant", reply);
+    setStatus("ready");
+    saveCachedDraft(currentTicketId, hashAtStart, chatHistory);
+  } catch (error) {
+    thinkingEl.remove();
+    if (ticketAtStart !== currentTicketId) {
+      const saved = ticketStates.get(ticketAtStart);
+      if (saved && saved.history[saved.history.length - 1]?.content === text) saved.history.pop();
+      return;
+    }
+    // Drop the unanswered turn so re-sending doesn't duplicate it in the history.
+    if (chatHistory[chatHistory.length - 1]?.content === text) chatHistory.pop();
+    appendChatMessage("assistant", `⚠️ ${error.message}`);
+    setStatus("error");
+  } finally {
+    elements.chatSendBtn.disabled = false;
+  }
 }
 
 function clearPanel() {
-  lastCategory = null;
-  lastSuggestedTemplateId = null;
+  if (currentTicketId) ticketStates.delete(currentTicketId);
   lastThreadStructured = null;
-  orderSearchContextCache = null;
   orderSearchContextPromise = null;
-  orderSearchResultCache.clear();
+  chatHistory.length = 0;
 
   elements.subject.value = "";
   elements.threadText.value = "";
+  elements.customerEmailInput.value = "";
+  elements.orderResultsDisplay.style.display = "none";
+  elements.orderResultsDisplay.innerHTML = "";
+  elements.manualLookup.style.display = "";
+  if (elements.lookupToggleBtn) elements.lookupToggleBtn.style.display = "none";
   elements.manualLookup.value = "";
-  elements.replyInstructions.value = "";
-  elements.summary.textContent = "";
-  elements.fields.textContent = "";
-  elements.questions.textContent = "";
-  elements.nextStep.textContent = "";
-  elements.draftReply.value = "";
+  elements.chatMessages.innerHTML = "";
+  elements.chatInput.value = "";
+  elements.chatQuickActions.style.display = "";
   elements.debugInfo.textContent = "";
   setStatus("cleared");
 }
 
-function handleError(error) {
-  console.error(error);
-  setStatus("error");
-  elements.nextStep.textContent = error.message || String(error);
+function friendlyErrorMessage(error) {
+  const msg = error?.message || String(error);
+  if (/could not establish connection|receiving end does not exist/i.test(msg)) {
+    return "Content script not reachable. Please reload the Znuny ticket page, then try Capture again.";
+  }
+  if (/no active tab/i.test(msg)) {
+    return "No active tab found. Open a ticket page and try again.";
+  }
+  if (/no content script response/i.test(msg)) {
+    return "Could not extract content. Reload the ticket page and try again.";
+  }
+  return msg;
 }
 
-loadSettings().catch(handleError);
+function handleError(error) {
+  console.error(error);
+  setStatus("error: " + friendlyErrorMessage(error).slice(0, 60));
+}
+
+function handleCaptureError(error) {
+  console.error(error);
+  const msg = friendlyErrorMessage(error);
+  setStatus("error");
+  showStatusBanner(msg);
+}
+
+let bannerTimeout = null;
+function showStatusBanner(msg) {
+  let banner = document.getElementById("statusBanner");
+  if (!banner) {
+    banner = document.createElement("div");
+    banner.id = "statusBanner";
+    banner.className = "status-banner";
+    document.querySelector(".app").insertBefore(banner, document.querySelector(".action-bar"));
+  }
+  banner.textContent = msg;
+  banner.style.display = "";
+  clearTimeout(bannerTimeout);
+  bannerTimeout = setTimeout(() => { banner.style.display = "none"; }, 6000);
+}
+
+// ── Event listeners ───────────────────────────────────────────────────────────
+
+function addRipple(btn) {
+  btn.addEventListener("click", (e) => {
+    const r = document.createElement("span");
+    r.className = "ripple";
+    const rect = btn.getBoundingClientRect();
+    r.style.left = (e.clientX - rect.left) + "px";
+    r.style.top  = (e.clientY - rect.top)  + "px";
+    btn.appendChild(r);
+    r.addEventListener("animationend", () => r.remove());
+  });
+}
+addRipple(elements.captureBtn);
+addRipple(elements.chatSendBtn);
+// Settings are loaded at the end of this file, before the first auto-draft.
+
+elements.lookupToggleBtn.addEventListener("click", () => {
+  const showing = elements.orderResultsDisplay.style.display !== "none";
+  elements.orderResultsDisplay.style.display = showing ? "none" : "";
+  elements.manualLookup.style.display = showing ? "" : "none";
+  elements.lookupToggleBtn.textContent = showing ? "原始数据" : "结构化视图";
+});
+
+elements.orderResultsDisplay.addEventListener("click", (e) => {
+  const copyBtn = e.target.closest(".copy-chip");
+  if (copyBtn) {
+    navigator.clipboard.writeText(copyBtn.dataset.copy || "").then(() => {
+      copyBtn.classList.add("copied");
+      const orig = copyBtn.textContent;
+      copyBtn.textContent = "✓";
+      setTimeout(() => { copyBtn.textContent = orig; copyBtn.classList.remove("copied"); }, 1500);
+    });
+    return;
+  }
+
+  const collapseBtn = e.target.closest(".order-collapse-btn");
+  if (collapseBtn) {
+    const extra = elements.orderResultsDisplay.querySelector(".order-extra-cards");
+    if (!extra) return;
+    const collapsed = extra.classList.toggle("collapsed");
+    const total = extra.querySelectorAll(".order-card").length + 1;
+    collapseBtn.textContent = collapsed ? `展开全部 (${total}条)` : "收起";
+  }
+});
+
 elements.captureBtn.addEventListener("click", () => {
   captureThread()
-    .then(() => autoSearchOrdersAfterCapture())
-    .catch(handleError);
+    .then((response) => { warnIfIncomplete(response); return autoSearchOrdersAfterCapture(); })
+    .catch(handleCaptureError);
 });
-elements.orderSearchBtn.addEventListener("click", () => runOrderSearch().catch(handleError));
-elements.orderSearchDebugBtn.addEventListener("click", () => runOrderSearch({ includeDebug: true }).catch(handleError));
-elements.analyzeBtn.addEventListener("click", () => analyzeThread().catch(handleError));
-elements.generateBtn.addEventListener("click", () => generateDraft().catch(handleError));
-elements.clearBtn.addEventListener("click", clearPanel);
-elements.refineBtn.addEventListener("click", () => refineDraft().catch(handleError));
-elements.copyBtn.addEventListener("click", () => copyDraft().catch(handleError));
+
+elements.orderSearchBtn.addEventListener("click", () => runOrderSearch().catch(handleCaptureError));
+elements.orderSearchDebugBtn.addEventListener("click", () => runOrderSearch({ includeDebug: true }).catch(handleCaptureError));
+elements.clearBtn.addEventListener("click", () => {
+  // Clear = "start this ticket over": also drop its cached draft.
+  forgetCachedDraft(currentTicketId);
+  clearPanel();
+});
+
+elements.chatSendBtn.addEventListener("click", () => sendChatMessage(elements.chatInput.value));
+
+function flashCopied(btn) {
+  const orig = btn.textContent;
+  btn.textContent = "✓";
+  btn.classList.add("copied");
+  setTimeout(() => { btn.textContent = orig; btn.classList.remove("copied"); }, 1500);
+}
+
+elements.copyTicketBtn.addEventListener("click", () => {
+  const subject = elements.subject.value;
+  const match = subject.match(/Ticket#?\s*([A-Z0-9-]+)/i);
+  const text = match ? match[1] : subject;
+  if (!text) return;
+  navigator.clipboard.writeText(text).then(() => flashCopied(elements.copyTicketBtn));
+});
+
+elements.copyEmailBtn.addEventListener("click", () => {
+  const email = elements.customerEmailInput.value.trim() || getCandidateCustomerEmail();
+  if (!email) return;
+  navigator.clipboard.writeText(email).then(() => flashCopied(elements.copyEmailBtn));
+});
+
+elements.chatClearBtn.addEventListener("click", () => {
+  forgetCachedDraft(currentTicketId);
+  chatHistory.length = 0;
+  elements.chatMessages.innerHTML = "";
+  elements.chatQuickActions.style.display = "";
+});
+
+elements.chatInput.addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    sendChatMessage(elements.chatInput.value);
+  }
+});
+
+elements.chatQuickActions.addEventListener("click", (e) => {
+  const chip = e.target.closest(".chat-chip");
+  if (chip) {
+    sendChatMessage(chip.dataset.msg || chip.textContent);
+  }
+});
+
+// ── Auto-draft on ticket open ────────────────────────────────────────────────
+// When the agent opens (or switches to) a Znuny ticket, capture the thread,
+// look up orders, and request a draft — so the agent only reviews and edits.
+
+function ticketIdFromUrl(url) {
+  const text = String(url || "");
+  if (!/Action=AgentTicketZoom/i.test(text)) return null;
+  const match = text.match(/[;&?]TicketID=(\d+)/i);
+  return match ? match[1] : null;
+}
+
+function isAutoDraftEnabled() {
+  return elements.autoDraftToggle ? elements.autoDraftToggle.checked : true;
+}
+
+function saveCurrentTicketState() {
+  if (!currentTicketId) return;
+  // Only keep tickets that have a conversation; anything half-done is redone on return.
+  if (!chatHistory.length) {
+    ticketStates.delete(currentTicketId);
+    return;
+  }
+  ticketStates.set(currentTicketId, {
+    subject: elements.subject.value,
+    threadText: elements.threadText.value,
+    structured: lastThreadStructured,
+    customerEmail: elements.customerEmailInput.value,
+    lookup: elements.manualLookup.value,
+    lookupDisplay: elements.manualLookup.style.display,
+    ordersHtml: elements.orderResultsDisplay.innerHTML,
+    ordersDisplay: elements.orderResultsDisplay.style.display,
+    toggleDisplay: elements.lookupToggleBtn ? elements.lookupToggleBtn.style.display : "",
+    history: chatHistory.slice()
+  });
+}
+
+function restoreTicketState(state) {
+  elements.subject.value = state.subject;
+  elements.threadText.value = state.threadText;
+  lastThreadStructured = state.structured;
+  elements.customerEmailInput.value = state.customerEmail;
+  elements.manualLookup.value = state.lookup;
+  elements.manualLookup.style.display = state.lookupDisplay;
+  elements.orderResultsDisplay.innerHTML = state.ordersHtml;
+  elements.orderResultsDisplay.style.display = state.ordersDisplay;
+  if (elements.lookupToggleBtn) elements.lookupToggleBtn.style.display = state.toggleDisplay;
+
+  chatHistory.length = 0;
+  chatHistory.push(...state.history);
+  elements.chatMessages.innerHTML = "";
+  chatHistory.forEach((m) => appendChatMessage(m.role, m.content));
+  elements.chatQuickActions.style.display = chatHistory.length ? "none" : "";
+  setStatus("restored");
+}
+
+function delay(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function waitUntilIdle(timeoutMs = 60000) {
+  const started = Date.now();
+  while (activeOperation && Date.now() - started < timeoutMs) {
+    await delay(300);
+  }
+  return !activeOperation;
+}
+
+async function runAutoDraft(ticketId) {
+  if (!(await waitUntilIdle()) || ticketId !== currentTicketId) return;
+
+  // The content script may not be ready right after navigation: retry once.
+  let captured;
+  try {
+    captured = await captureThread();
+  } catch (_firstError) {
+    await delay(1500);
+    if (ticketId !== currentTicketId) return;
+    captured = await captureThread();
+  }
+  if (ticketId !== currentTicketId) return;
+
+  // Some article bodies failed to load (Znuny error page right after opening):
+  // try once more. Only the newest customer message is essential — older
+  // articles without an HTML body (plain-text mails, system notices, empty
+  // notes) fail every time and must not block drafting forever.
+  if (failedBodyCount(captured) > 0) {
+    await delay(2500);
+    if (ticketId !== currentTicketId) return;
+    captured = await captureThread();
+    if (ticketId !== currentTicketId) return;
+    if (captured?.debug?.znuny_latest_incoming_failed) {
+      setStatus("auto-draft skipped: 客户最新邮件未加载");
+      showStatusBanner("客户最新一封邮件的内容没加载出来，未自动起草。请稍后再点 Capture。");
+      return;
+    }
+    warnIfIncomplete(captured);
+  }
+
+  if (!elements.threadText.value.trim()) {
+    setStatus("auto-draft skipped: empty thread");
+    return;
+  }
+
+  if (captured?.debug?.translated_fallback) warnIfIncomplete(captured);
+
+  await autoSearchOrdersAfterCapture();
+  if (ticketId !== currentTicketId) return;
+
+  // Respect anything the agent already started typing or sending meanwhile.
+  if (chatHistory.length) return;
+
+  // Same thread as last time → restore that draft instead of re-generating.
+  const cached = await loadCachedDraft(ticketId, threadHash(elements.subject.value, elements.threadText.value));
+  if (ticketId !== currentTicketId || chatHistory.length) return;
+  if (cached) {
+    chatHistory.push(...cached.history);
+    elements.chatMessages.innerHTML = "";
+    chatHistory.forEach((m) => appendChatMessage(m.role, m.content));
+    elements.chatQuickActions.style.display = "none";
+    setStatus("已恢复上次的草稿（邮件没有变化）");
+    return;
+  }
+
+  const nonCustomer = await looksLikeNonCustomerMail(ticketId);
+  if (ticketId !== currentTicketId || chatHistory.length) return;
+  if (nonCustomer) {
+    setStatus("auto-draft skipped: 非客户邮件");
+    showStatusBanner(`看起来不是客户来信（${nonCustomer.reason || "推广/垃圾邮件"}），未自动起草。需要的话点"写回复"。`);
+    return;
+  }
+
+  await sendChatMessage(AUTO_DRAFT_PROMPT);
+}
+
+async function handleActiveTabChange(tab) {
+  const ticketId = ticketIdFromUrl(tab?.url);
+  if (!ticketId || ticketId === currentTicketId) return;
+
+  saveCurrentTicketState();
+  currentTicketId = ticketId;
+
+  const saved = ticketStates.get(ticketId);
+  if (saved) {
+    restoreTicketState(saved);
+    return;
+  }
+
+  clearPanel();
+  if (!isAutoDraftEnabled()) {
+    setStatus("new ticket — click Capture");
+    return;
+  }
+
+  setStatus("auto-drafting…");
+  runAutoDraft(ticketId).catch((error) => {
+    if (ticketId === currentTicketId) handleCaptureError(error);
+  });
+}
+
+let panelWindowId = null;
+
+chrome.windows.getCurrent().then((win) => { panelWindowId = win.id; }).catch(() => {});
+
+chrome.tabs.onActivated.addListener(({ tabId, windowId }) => {
+  if (panelWindowId !== null && windowId !== panelWindowId) return;
+  chrome.tabs.get(tabId).then(handleActiveTabChange).catch(() => {});
+});
+
+chrome.tabs.onUpdated.addListener((_tabId, changeInfo, tab) => {
+  if (changeInfo.status !== "complete" || !tab.active) return;
+  if (panelWindowId !== null && tab.windowId !== panelWindowId) return;
+  handleActiveTabChange(tab);
+});
+
+elements.autoDraftToggle?.addEventListener("change", () => {
+  chrome.storage.local.set({ autoDraft: elements.autoDraftToggle.checked }).catch(() => {});
+});
+
+// When the panel opens on a ticket that is already showing, draft for it too.
+loadSettings()
+  .catch(console.error)
+  .then(() => getActiveTab())
+  .then(handleActiveTabChange)
+  .catch(() => {});

@@ -5,6 +5,16 @@ const {
   pickTemplate,
   findTemplateById
 } = require("./helpers");
+const {
+  loadClassificationRules,
+  loadFreeCreditConfig,
+  getSummary,
+  getQuestions,
+  getGuidance,
+  getFreeCreditGuidance,
+  buildFreeCreditNextStepFromConfig,
+  getDraftTemplate
+} = require("./mock-engine-loader");
 
 function extractFieldsMock(input) {
   const body = typeof input === "string" ? { thread_text: input } : input || {};
@@ -31,32 +41,34 @@ function extractFieldsMock(input) {
 
 function inferCategory(text) {
   const lower = text.toLowerCase();
+  const rules = loadClassificationRules();
 
-  if (/(invoice|billing info|tax invoice|receipt)/.test(lower)) {
+  if (new RegExp(rules.invoice.pattern).test(lower)) {
     return "invoice";
   }
 
-  if (/(free.?credits?|credit.*follow|follow.*credit|subscribe.*credit|credit.*subscri)/.test(lower)) {
+  const creditRule = rules.free_credit;
+  const hasCreditKeyword = new RegExp(creditRule.patterns.hasCreditsKeyword).test(lower);
+  const hasAtHandle = new RegExp(creditRule.patterns.hasAtHandle).test(text);
+  const hasSocialUrl = new RegExp(creditRule.patterns.hasSocialUrl).test(text);
+
+  if (hasAtHandle || (hasCreditKeyword && hasSocialUrl)) {
     return "free_credit";
   }
 
-  if (/(cancel.{0,20}(renew|subscri)|cancell?ation.{0,20}(subscri|plan)|do not renew|don.t renew|stop.{0,15}renew|stop.{0,10}bill|unsubscribe)/.test(lower)) {
+  if (new RegExp(rules.cancel_renewal.pattern).test(lower)) {
     return "cancel_renewal";
   }
 
-  if (/(refund|money back|auto-renew|renewed automatically)/.test(lower)) {
+  if (new RegExp(rules.refund.pattern).test(lower)) {
     return "refund";
   }
 
-  if (
-    /(license code|registration code|activation code|serial|code does not work|can't activate|cannot activate|new code)/.test(
-      lower
-    )
-  ) {
+  if (new RegExp(rules.account.pattern).test(lower)) {
     return "account";
   }
 
-  if (/(bug|crash|not working|error|failed|program issue|slow|freeze|stuck)/.test(lower)) {
+  if (new RegExp(rules.technical.pattern).test(lower)) {
     return "technical";
   }
 
@@ -116,11 +128,22 @@ function extractFreeCredit(body) {
     .map((m) => m[0].replace(/[,.)>\s]+$/, ""))
     .filter((v, i, a) => a.indexOf(v) === i);
 
-  const youtubeIds = [...(text.matchAll(/@[\w.]{2,}/g) || [])]
+  const youtubeIds = [...(text.matchAll(/(?<!\S)@[\w.]{2,}/g) || [])]
     .map((m) => m[0])
     .filter((v, i, a) => a.indexOf(v) === i);
 
-  const { youtubeScreenshot, twitterScreenshot, ambiguousImages } = classifyArticleAttachments(articles);
+  const classified = classifyArticleAttachments(articles);
+  let youtubeScreenshot = classified.youtubeScreenshot;
+  const twitterScreenshot = classified.twitterScreenshot;
+  let ambiguousImages = classified.ambiguousImages;
+
+  // Ambiguous screenshot + YouTube handle → generate spreadsheet row but flag for manual verification
+  let screenshotNeedsVerification = false;
+  if (ambiguousImages && !youtubeScreenshot && youtubeIds.length > 0) {
+    youtubeScreenshot = true;
+    ambiguousImages = false;
+    screenshotNeedsVerification = true;
+  }
 
   const validChannels = [];
   const validLinks = [];
@@ -154,7 +177,8 @@ function extractFreeCredit(body) {
     youtubeIds,
     totalCredits: validChannels.length * 60,
     customerEmail,
-    ambiguousImages
+    ambiguousImages,
+    screenshotNeedsVerification
   };
 }
 
@@ -167,8 +191,8 @@ function formatSpreadsheetRow(info) {
 function buildFreeCreditDraft(info, template) {
   const opening = template?.opening || "Hi,";
   const closing = template?.closing || "Best regards,";
-  const youtubeAsk =
-    "As we're currently unable to verify YouTube subscriptions from our end, could you please send us a screenshot showing that you've subscribed to our YouTube channel? This will help us complete the verification process.";
+  const draftTemplates = getDraftTemplate("free_credit");
+  const youtubeAsk = draftTemplates.youtube_ask;
 
   // All channels confirmed — no draft needed
   if (!info.youtubeIdPending && !info.ambiguousImages) {
@@ -177,57 +201,30 @@ function buildFreeCreditDraft(info, template) {
 
   // Ambiguous image — can't determine channel
   if (info.ambiguousImages) {
-    return `${opening}
-
-Thank you for reaching out.
-
-We received your message but were unable to determine which channel the attached image is for. Could you please confirm which platform the screenshot is from?
-
-${closing}`.trim();
+    return draftTemplates.ambiguous_image.replace("{closing}", closing).trim();
   }
 
   // Has valid channels + YouTube ID pending
   if (info.validChannels.length > 0 && info.youtubeIdPending) {
     const channelNote = `We have received your ${info.validChannels.join(" and ")} follow information and will process it shortly.`;
-    return `${opening}
-
-Thank you for your support!
-
-${channelNote}
-
-Regarding your YouTube subscription — ${youtubeAsk}
-
-${closing}`.trim();
+    return draftTemplates.valid_channels_with_youtube_pending
+      .replace("{channels}", info.validChannels.join(" and "))
+      .replace("{youtube_ask}", youtubeAsk)
+      .replace("{closing}", closing)
+      .replace(`${opening}\n\n`, "")
+      .trim();
   }
 
   // Only YouTube ID, nothing else confirmed yet
-  return `${opening}
-
-Thank you for your support!
-
-${youtubeAsk}
-
-${closing}`.trim();
+  return draftTemplates.only_youtube_id
+    .replace("{youtube_ask}", youtubeAsk)
+    .replace("{closing}", closing)
+    .replace(`${opening}\n\n`, "")
+    .trim();
 }
 
 function buildFreeCreditNextStep(info) {
-  const parts = [];
-
-  if (info.ambiguousImages) {
-    parts.push("Manual check required: attached image content cannot be determined automatically. Ask the customer to clarify the channel.");
-  }
-  if (info.youtubeIdPending) {
-    parts.push("YouTube: awaiting screenshot from customer.");
-  }
-  if (info.validChannels.length > 0) {
-    parts.push(`Log to spreadsheet — copy the row below:\n${formatSpreadsheetRow(info)}`);
-    parts.push('Check spreadsheet the next day. Once credit is confirmed, reply using "AVCLabs: Add Free Credits (login with email)" template.');
-  }
-  if (!info.validChannels.length && !info.youtubeIdPending && !info.ambiguousImages) {
-    parts.push("No valid social media channels identified. Review the email manually.");
-  }
-
-  return parts.join("\n\n");
+  return buildFreeCreditNextStepFromConfig(info);
 }
 
 // === END FREE CREDIT HELPERS ===
@@ -276,26 +273,6 @@ function suggestTemplateFromStructuredData(category, body, templates) {
     return findTemplateById("cancel_renewal_v1", templates);
   }
 
-  if (responses.some((item) => item.includes("cancel subscription"))) {
-    return findTemplateById("cancel_renewal_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("ask for refunding") || item.includes("refund policy"))) {
-    return findTemplateById("refund_auto_renewal_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("register") || item.includes("new code"))) {
-    return findTemplateById("license_code_not_working_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("log files"))) {
-    return findTemplateById("technical_issue_collect_info_v1", templates);
-  }
-
-  if (responses.some((item) => item.includes("invoice"))) {
-    return findTemplateById("invoice_request_v1", templates);
-  }
-
   if (category === "account") {
     return findTemplateById("license_code_not_working_v1", templates);
   }
@@ -309,111 +286,31 @@ function suggestTemplateFromStructuredData(category, body, templates) {
 
 function buildSummary(text, category, structured) {
   const firstLine = normalizeText(structured?.active_article_body || text).split("\n")[0] || "";
-
-  const map = {
-    free_credit: "Customer is requesting free credits for following social media channels.",
-    cancel_renewal: "Customer is requesting to cancel their subscription or auto-renewal.",
-    refund: "Customer is asking about a refund or charge dispute.",
-    invoice: "Customer is asking for invoice or billing documentation.",
-    account: "Customer is reporting an account, activation, or license code issue.",
-    technical: "Customer is reporting a technical issue and likely needs information collection before escalation.",
-    general: "Customer request needs manual review."
-  };
-
-  return firstLine ? `${map[category]} First visible line: ${firstLine}` : map[category];
+  return getSummary(category, firstLine);
 }
 
 function buildQuestions(category, fields) {
-  const questions = [];
-
-  if (category === "cancel_renewal") {
-    if (!fields.account) {
-      questions.push("Could you confirm the email address used for the purchase?");
-    }
-    return questions;
-  }
-
-  if (!fields.order_id && (category === "refund" || category === "invoice")) {
-    questions.push("Could you please share your order number?");
-  }
-
-  if (!fields.account) {
-    questions.push("Could you confirm the email address used for the purchase?");
-  }
-
-  if (category === "account") {
-    questions.push("Could you share the license code and a screenshot of the error message?");
-  }
-
-  if (category === "technical") {
-    questions.push("Could you share the product version, operating system, and steps to reproduce the issue?");
-  }
-
-  return [...new Set(questions)].slice(0, 4);
+  return getQuestions(category, fields);
 }
 
 function buildNextStep(category, body) {
   if (category === "cancel_renewal") {
     const status = parseSubscriptionStatus(body?.manual_lookup_result);
-    if (status === "not_found") {
-      return "No order found. Ask the customer to confirm the email address used for purchase.";
-    }
-    if (status === "all_cancelled") {
-      return "All subscriptions are already cancelled. Use the 'AVCLabs: cancel subscription' standard reply to confirm no further charges.";
-    }
-    if (status === "has_active") {
-      return "Active subscription found (PAID). Send acknowledgment email to customer. Then escalate: People → Owner → paste order info into text field → assign New Owner to Julie Cai → set subject to '取消续订'.";
-    }
-    return "Run order search first to check subscription status before replying.";
+    return getGuidance(category, status);
   }
-  if (category === "refund") {
-    return "Review the order manually in the backend before sending any refund-related reply.";
-  }
-  if (category === "invoice") {
-    return "Collect the missing billing details and continue the manual invoice process.";
-  }
-  if (category === "account") {
-    return "After collecting the required details, continue in the technical support platform.";
-  }
-  if (category === "technical") {
-    return "Collect missing technical details first, then record the case and escalate through the shared document and Redmine if needed.";
-  }
-  return "Review the email manually and choose the closest support template.";
+  return getGuidance(category);
 }
 
 function buildCancelRenewalDraft(body, template) {
   const opening = template?.opening || "Hi,";
   const closing = template?.closing || "Best regards,";
   const status = parseSubscriptionStatus(body?.manual_lookup_result);
+  const draftTemplates = getDraftTemplate("cancel_renewal");
 
-  if (status === "all_cancelled") {
-    return `${opening}
+  const templateKey = status === "all_cancelled" ? "all_cancelled" :
+                      status === "has_active" ? "has_active" : "not_found";
 
-Thank you for contacting us.
-
-We have checked your account and can confirm that your subscription has already been cancelled. No further charges will be made to your account.
-
-${closing}`.trim();
-  }
-
-  if (status === "has_active") {
-    return `${opening}
-
-Thank you for contacting us.
-
-We have received your request and will assist you in submitting your request to cancel your auto-renewal. You will be notified by email upon success.
-
-${closing}`.trim();
-  }
-
-  // not_found or no order search run yet
-  return `${opening}
-
-Thank you for contacting us.
-
-To help us locate your subscription, could you please confirm the email address used for the purchase?
-
-${closing}`.trim();
+  return `${opening}\n\n${draftTemplates[templateKey]}\n\n${closing}`.trim();
 }
 
 function buildDraft({ category, fields, template, body }) {
@@ -421,13 +318,9 @@ function buildDraft({ category, fields, template, body }) {
     return buildCancelRenewalDraft(body, template);
   }
 
-  const customerNeed = {
-    refund: "your refund-related request",
-    invoice: "your invoice request",
-    account: "the activation issue",
-    technical: "the issue you reported",
-    general: "your request"
-  }[category];
+  const draftTemplate = getDraftTemplate("generic_support");
+  const categoryTemplate = getDraftTemplate(category);
+  const customerNeed = categoryTemplate?.customer_need || "your request";
 
   const opening = template?.opening || "Hi,";
   const closing = template?.closing || "Best regards,";
@@ -441,17 +334,14 @@ function buildDraft({ category, fields, template, body }) {
     ? `To help us proceed, could you please provide the following information?\n\n- ${questions.join("\n- ")}`
     : "We will review the details and assist you further.";
 
-  return `${opening}
-
-Thank you for contacting us.
-
-We understand that you are contacting us about ${customerNeed}. ${contextSentence}${orderSentence}${
-    template?.body_guidance?.[0] || "We would like to help you with this as quickly as possible."
-  }
-
-${questionBlock}
-
-${closing}`.trim();
+  return draftTemplate
+    .replace("{opening}", opening)
+    .replace("{customer_need}", customerNeed)
+    .replace("{context_sentence}", contextSentence)
+    .replace("{order_sentence}", orderSentence)
+    .replace("{body_guidance}", template?.body_guidance?.[0] || "We would like to help you with this as quickly as possible.")
+    .replace("{question_block}", questionBlock)
+    .replace("{closing}", closing);
 }
 
 function analyzeThreadMock(body, templates) {
@@ -464,7 +354,7 @@ function analyzeThreadMock(body, templates) {
     const template = findTemplateById("free_credit_youtube_v1", templates);
     return {
       category,
-      summary: `Customer is requesting free credits for following social media channels.`,
+      summary: `客户申请关注社交媒体渠道的免费积分。`,
       confidence: 0.85,
       extracted_fields: {
         customer_email: info.customerEmail,
@@ -475,6 +365,7 @@ function analyzeThreadMock(body, templates) {
       },
       clarification_questions: [],
       next_step: buildFreeCreditNextStep(info),
+      spreadsheet_row: info.validChannels.length > 0 ? formatSpreadsheetRow(info) : "",
       suggested_template_id: info.youtubeIdPending ? (template?.id || null) : null
     };
   }
@@ -508,6 +399,7 @@ function generateDraftMock(body, templates) {
       draft_reply: buildFreeCreditDraft(info, template),
       clarification_questions: [],
       next_step: buildFreeCreditNextStep(info),
+      spreadsheet_row: info.validChannels.length > 0 ? formatSpreadsheetRow(info) : "",
       extracted_fields: {
         customer_email: info.customerEmail,
         valid_channels: info.validChannels,
@@ -547,6 +439,7 @@ function refineDraftMock(body, templates) {
       draft_reply: buildFreeCreditDraft(info, template),
       clarification_questions: [],
       next_step: buildFreeCreditNextStep(info),
+      spreadsheet_row: info.validChannels.length > 0 ? formatSpreadsheetRow(info) : "",
       extracted_fields: {
         customer_email: info.customerEmail,
         valid_channels: info.validChannels,
@@ -574,9 +467,50 @@ function refineDraftMock(body, templates) {
   };
 }
 
+function chatMock({ messages = [], thread_context = {}, order_context = "" } = {}) {
+  const lastMsg = String(messages[messages.length - 1]?.content || "").toLowerCase();
+  const subject = thread_context?.subject || "";
+  const hasThread = Boolean((thread_context?.thread_text || "").trim());
+
+  if (/draft|reply|write|compose|email/i.test(lastMsg)) {
+    const body = hasThread
+      ? "Thank you for contacting us. We have reviewed your request and will follow up with you shortly."
+      : "Thank you for reaching out to AVCLabs Support. Could you please provide more details about your issue so we can assist you?";
+    return {
+      reply: `Subject: Re: ${subject || "(no subject)"}\n\nDear Customer,\n\n${body}\n\nBest regards,\nAVCLabs Support Team`
+    };
+  }
+
+  if (/summar|what is the issue|what happened|describe/i.test(lastMsg)) {
+    return {
+      reply: hasThread
+        ? `Summary: The customer has submitted a support request. Subject: "${subject}". Please review the email thread for full context.`
+        : "No email thread has been captured yet. Click Capture to extract the thread from the current page."
+    };
+  }
+
+  if (/ask|question|need.*info|what.*info|missing/i.test(lastMsg)) {
+    return {
+      reply: "Consider asking the customer for:\n- Their purchase email address\n- Order ID or transaction ID\n- Product name and version\n- Operating system\n- Steps already attempted"
+    };
+  }
+
+  if (/next step|what should|recommend|eligible|refund|policy/i.test(lastMsg)) {
+    return {
+      reply: "Review the customer's issue against our standard policies. If order information is available, check the purchase date and status before proceeding. Use the Order Search to look up their order if you have their email."
+    };
+  }
+
+  return {
+    reply: `Running in mock mode — responses are template-based.\n\nFor full AI assistance, configure a real provider in .env:\n  AI_PROVIDER=deepseek\n  DEEPSEEK_API_KEY=...\n\nTry asking: "Write a reply", "Summarize the issue", or "What should I ask?"`
+  };
+}
+
 module.exports = {
+  extractFreeCredit,
   analyzeThreadMock,
   extractFieldsMock,
   generateDraftMock,
-  refineDraftMock
+  refineDraftMock,
+  chatMock
 };

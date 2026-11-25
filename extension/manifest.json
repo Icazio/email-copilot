@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Email Copilot MVP",
+  "name": "Email Copilot",
   "version": "0.1.0",
   "description": "Internal side-panel copilot for support email drafting.",
   "permissions": ["activeTab", "storage", "sidePanel", "scripting", "webNavigation"],
@@ -17,7 +17,7 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
-      "js": ["content.js"],
+      "js": ["content.js", "znuny-actions.js", "queue-spam.js", "queue-order-lookup.js", "queue-routing.js", "queue-triage.js"],
       "run_at": "document_idle",
       "all_frames": true,
       "match_about_blank": true

@@ -1,0 +1,34 @@
+{
+  "entries": [
+    {
+      "id": "policy-001",
+      "title": "Refund Handling Process",
+      "tags": ["refund", "process", "submit", "approve", "refunded", "退款流程", "返金", "remboursement", "Rückerstattung", "reembolso"],
+      "content": "When a refund request is eligible, the agent submits the refund internally (internal step — never mention it, a 'responsible team' or any other team to the customer; in the email, 'we' handle the refund). Do not directly promise the refund in the reply unless the agent confirms it is approved. Standard reply when request is received: 'We have received your request and will assist you in submitting your refund request. You will be notified by email upon success.' After the refund is successfully processed, use the 'refunded' template to notify the customer. Refund processing time: 3–10 working days depending on payment method (Paddle or Stripe)."
+    },
+    {
+      "id": "policy-002",
+      "title": "Auto-Renewal Cancellation Process",
+      "tags": ["cancel", "auto-renewal", "cancellation", "unsubscribe", "stop renewal", "取消续订", "キャンセル", "annuler", "annulation", "kündigen", "Kündigung", "cancelar", "cancelación"],
+      "content": "If a customer requests cancellation of auto-renewal, the agent processes the cancellation internally (internal step — never mention a 'responsible team' or any other team to the customer; in the email, 'we' handle it). Standard reply when request is received: 'We have received your request and will assist you in submitting your request to cancel your auto-renewal. You will be notified by email upon success.' After cancellation is processed, use the 'cancel' template to notify the customer."
+    },
+    {
+      "id": "policy-003",
+      "title": "Complaint and Angry Customer Handling",
+      "tags": ["complaint", "angry", "frustrated", "upset", "threat", "chargeback", "dispute", "negative review", "投诉", "退单"],
+      "content": "Stay calm and professional. Acknowledge the customer's frustration without arguing. For chargeback threats: explain that chargebacks may result in account suspension, and that we prefer to resolve the issue through our standard refund process — process the refund directly if eligible. For social media or negative review threats: express understanding, commit to resolving quickly, do not argue or make defensive statements. Escalate immediately to a supervisor when: customer threatens legal action, the issue involves a data or privacy breach, or the problem has gone unresolved across multiple contacts."
+    },
+    {
+      "id": "policy-004",
+      "title": "Forbidden Language and Promises",
+      "tags": ["promise", "guarantee", "forbidden", "avoid", "do not say", "language"],
+      "content": "Agents must never use the following: 'We will fix it immediately' or 'We will resolve it right away' (some issues take time to investigate); 'It is your fault' or any language blaming the customer; 'We cannot help you' (always offer an alternative or next step instead); 'We guarantee a refund' or any unconditional refund promise before the request has been reviewed and approved. Always use measured language: 'we will review', 'we will follow up', 'you will be notified upon success'."
+    },
+    {
+      "id": "policy-005",
+      "title": "Technical Issue Handling Process",
+      "tags": ["technical", "crash", "log", "escalate", "tech team", "support", "技术问题"],
+      "content": "Step 1: Try common first-line fixes — ask customer to update GPU drivers, verify software is latest version, reinstall the software. Step 2: If first-line fixes fail, use the 'crash' template to request log files from the customer. Step 3: Submit the logs and all steps already attempted to the technical team via the ticket system. Do not promise a fix timeline. If the issue is unresolved after 30 days, process a refund per the standard refund policy."
+    }
+  ]
+}

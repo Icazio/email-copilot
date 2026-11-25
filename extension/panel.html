@@ -3,100 +3,207 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Email Copilot MVP</title>
+    <title>Email Copilot</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="stylesheet" href="panel.css" />
   </head>
   <body>
     <div class="app">
+
+      <!-- Header -->
       <header class="header">
-        <div>
-          <h1>Email Copilot</h1>
-          <p>Read-only draft assistant for support emails</p>
+        <div class="header-brand">
+          <div class="brand-dot"></div>
+          <span class="brand-name">Email Copilot</span>
         </div>
         <span id="status" class="badge">idle</span>
       </header>
 
-      <section class="card">
-        <label for="backendUrl">Backend URL</label>
-        <input id="backendUrl" type="text" value="http://localhost:8787" />
+      <!-- Tool links -->
+      <div class="tool-links">
+        <a href="http://sz.anvsoft-dev.com:81/login?back_url=http%3A%2F%2Fsz.anvsoft-dev.com%3A81%2Fprojects" target="_blank" class="tool-link">Redmine</a>
+        <a href="https://ipn.anvsoftware.com/query/index.php" target="_blank" class="tool-link">技术支持</a>
+        <a href="https://docs.qq.com/sheet/DWmVpcVpqWGRiTUVK?tab=BB08J2" target="_blank" class="tool-link">Credit 表格</a>
+      </div>
 
-        <details>
-          <summary>Centuran Selectors</summary>
+      <!-- Main actions -->
+      <div class="action-bar">
+        <button id="captureBtn" class="btn-primary">Capture</button>
+        <button id="clearBtn" class="btn-ghost btn-clear">Clear</button>
+        <label class="auto-draft-toggle" title="打开工单时自动抓取、查订单并起草回复">
+          <input id="autoDraftToggle" type="checkbox" checked />
+          自动起草
+        </label>
+      </div>
 
-          <label for="subjectSelectors">Subject Selectors</label>
-          <textarea id="subjectSelectors" rows="5"></textarea>
+      <!-- Thread -->
+      <div class="card">
+        <div class="field-group">
+          <div class="field-label-row">
+            <label for="subject">Subject</label>
+            <button id="copyTicketBtn" class="copy-chip">复制工单号</button>
+          </div>
+          <input id="subject" type="text" />
+        </div>
+        <details class="subtle-details">
+          <summary>Email Thread</summary>
+          <textarea id="threadText" rows="9" style="margin-top:8px"></textarea>
+        </details>
+      </div>
 
-          <label for="threadSelectors">Thread Container Selectors</label>
-          <textarea id="threadSelectors" rows="7"></textarea>
+      <!-- Order lookup -->
+      <div class="card">
+        <div class="field-group">
+          <div class="field-label-row">
+            <label for="customerEmailInput">Customer Email</label>
+            <button id="copyEmailBtn" class="copy-chip">复制邮箱</button>
+          </div>
+          <div class="search-row">
+            <input id="customerEmailInput" type="email" placeholder="自动识别，或手动填写后重新查询" />
+            <button id="orderSearchBtn" class="btn-secondary">Search</button>
+            <button id="orderSearchDebugBtn" class="btn-ghost-sm">Debug</button>
+          </div>
+        </div>
+        <div class="field-group">
+          <div class="lookup-label-row">
+            <label for="manualLookup">Order Lookup Result</label>
+            <button class="lookup-toggle" id="lookupToggleBtn" style="display:none">原始数据</button>
+          </div>
+          <div id="orderResultsDisplay" style="display:none"></div>
+          <textarea id="manualLookup" rows="5" placeholder="订单查询结果将显示在这里，或手动粘贴..."></textarea>
+        </div>
+      </div>
 
-          <label for="messageSelectors">Message Item Selectors</label>
-          <textarea id="messageSelectors" rows="6"></textarea>
+      <!-- License activation (ipn.anvsoftware.com/query/onlinecheck.php) -->
+      <details class="card" id="licenseCard">
+        <summary class="card-summary">🔑 注册码激活查询 / 重置</summary>
+        <div class="ta-hint">使用技术支持系统（需已在浏览器登录）。订单卡片上的「激活」按钮会自动填好。</div>
+        <div class="ta-group">
+          <select id="licProduct"><option value="">— 展开后加载产品列表 —</option></select>
+          <input id="licEmail" type="email" placeholder="注册邮箱" />
+          <input id="licCode" type="text" placeholder="注册码" />
+          <div class="ta-row"><button id="licQueryBtn" class="btn-secondary">查询</button></div>
+        </div>
+        <div id="licResult" style="margin-top:8px"></div>
+        <div id="licStatus" class="ta-status"></div>
+      </details>
+
+      <!-- Chatbox -->
+      <div class="chat-wrap">
+        <!-- messages area -->
+        <div class="chat-body">
+          <div class="chat-header">
+            <span class="chat-label">Chat</span>
+            <button id="chatClearBtn" class="chat-clear-btn">清空对话</button>
+          </div>
+          <div id="chatMessages" class="chat-messages"></div>
+        </div>
+        <!-- footer: chips + input -->
+        <div class="chat-footer">
+          <div class="chat-quick-actions" id="chatQuickActions">
+            <button class="chat-chip" data-msg="帮我写一封英文回复邮件。">写回复</button>
+            <button class="chat-chip" data-msg="用2-3句话总结一下客户的问题。">总结问题</button>
+            <button class="chat-chip" data-msg="我还需要向客户询问哪些信息？">还需问什么</button>
+            <button class="chat-chip" data-msg="这个工单下一步应该怎么处理？">下一步</button>
+          </div>
+          <div class="chat-input-row">
+            <textarea id="chatInput" rows="2" placeholder="随时提问…"></textarea>
+            <button id="chatSendBtn" class="btn-primary chat-send-btn">发送</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Ticket actions (Znuny ticket zoom page) -->
+      <details class="card" id="ticketActionsCard">
+        <summary class="card-summary">🛠 工单操作</summary>
+        <div class="ta-hint" id="taTicketLabel">在工单详情页使用；每个操作执行前都会再确认一次。</div>
+
+        <div class="ta-group">
+          <div class="ta-title">内部备注（客户看不到）</div>
+          <input id="taNoteSubject" type="text" placeholder="备注标题（可留空）" />
+          <textarea id="taNoteBody" rows="3" placeholder="备注内容"></textarea>
+          <button id="taNoteBtn" class="btn-secondary">添加内部备注</button>
+        </div>
+
+        <div class="ta-group">
+          <div class="ta-title">按流程转交</div>
+          <div class="ta-row" id="taEscalations"></div>
+          <div class="ta-hint">转交备注默认使用「订单查询结果」框里的内容。</div>
+        </div>
+
+        <div class="ta-group">
+          <div class="ta-title">状态</div>
+          <div class="ta-row">
+            <button id="taLockBtn" class="btn-ghost-sm">锁定</button>
+            <button id="taUnlockBtn" class="btn-ghost-sm">解锁</button>
+            <button id="taCloseBtn" class="btn-ghost-sm">关闭工单（成功）</button>
+          </div>
+        </div>
+
+        <div class="ta-group">
+          <div class="ta-title">记录</div>
+          <div class="ta-row">
+            <button id="taRefundOpenBtn" class="btn-ghost-sm">记录退款（飞书）</button>
+            <button id="taCreditOpenBtn" class="btn-ghost-sm">记录积分（腾讯文档）</button>
+          </div>
+          <div id="taRecordForm" class="ta-record" style="display:none">
+            <div id="taRecordTitle" class="ta-title"></div>
+            <div id="taRecordHint" class="ta-hint"></div>
+            <div id="taRecordFields"></div>
+            <div class="ta-row">
+              <button id="taRecordSubmitBtn" class="btn-secondary">确认记录</button>
+              <button id="taRecordCancelBtn" class="btn-ghost-sm">取消</button>
+            </div>
+          </div>
+        </div>
+
+        <details class="subtle-details">
+          <summary>检查表单字段（只读，不提交）</summary>
+          <div class="ta-row" style="margin-top:6px">
+            <button class="btn-ghost-sm ta-inspect" data-action="AgentTicketNote">备注</button>
+            <button class="btn-ghost-sm ta-inspect" data-action="AgentTicketOwner">转交</button>
+            <button class="btn-ghost-sm ta-inspect" data-action="AgentTicketClose">关闭</button>
+          </div>
+          <pre id="taInspectOut" class="ta-output"></pre>
         </details>
 
-        <div class="actions">
-          <button id="captureBtn">Capture Thread</button>
-          <button id="orderSearchBtn">Search Orders</button>
-          <button id="orderSearchDebugBtn">OrderSearch Debug</button>
-          <button id="analyzeBtn">Analyze</button>
-          <button id="generateBtn">Generate Draft</button>
-          <button id="clearBtn">Clear</button>
+        <div id="taStatus" class="ta-status"></div>
+      </details>
+
+      <!-- Config (collapsed) -->
+      <details class="card">
+        <summary class="card-summary">⚙ Config</summary>
+        <div class="field-group">
+          <label for="backendUrl">Backend URL</label>
+          <input id="backendUrl" type="text" value="http://localhost:8787" />
         </div>
-      </section>
+        <details class="subtle-details">
+          <summary>Centuran Selectors</summary>
+          <div class="field-group" style="margin-top:8px">
+            <label for="subjectSelectors">Subject Selectors</label>
+            <textarea id="subjectSelectors" rows="4"></textarea>
+          </div>
+          <div class="field-group">
+            <label for="threadSelectors">Thread Container Selectors</label>
+            <textarea id="threadSelectors" rows="5"></textarea>
+          </div>
+          <div class="field-group">
+            <label for="messageSelectors">Message Item Selectors</label>
+            <textarea id="messageSelectors" rows="4"></textarea>
+          </div>
+        </details>
+      </details>
 
-      <section class="card">
-        <label for="subject">Subject</label>
-        <input id="subject" type="text" />
-
-        <label for="threadText">Email Thread</label>
-        <textarea id="threadText" rows="10"></textarea>
-
-        <label for="manualLookup">Manual Lookup Result</label>
-        <textarea id="manualLookup" rows="5" placeholder="Paste customer or order lookup results here..."></textarea>
-
-        <label for="replyInstructions">Reply Instructions</label>
-        <textarea
-          id="replyInstructions"
-          rows="4"
-          placeholder="Enter agent notes or reply requirements, for example: explain politely, do not promise refund, ask for order ID first."
-        ></textarea>
-
-        <div class="actions">
-          <button id="refineBtn">Refine Draft</button>
-          <button id="copyBtn">Copy Draft</button>
-        </div>
-      </section>
-
-      <section class="card">
-        <h2>Summary</h2>
-        <pre id="summary"></pre>
-      </section>
-
-      <section class="card">
-        <h2>Extracted Fields</h2>
-        <pre id="fields"></pre>
-      </section>
-
-      <section class="card">
-        <h2>Questions To Ask</h2>
-        <pre id="questions"></pre>
-      </section>
-
-      <section class="card">
-        <h2>Next Step</h2>
-        <pre id="nextStep"></pre>
-      </section>
-
-      <section class="card">
-        <h2>Draft Reply</h2>
-        <textarea id="draftReply" rows="14"></textarea>
-      </section>
-
-      <section class="card">
-        <h2>Capture Debug</h2>
+      <!-- Debug (collapsed) -->
+      <details class="card">
+        <summary class="card-summary">Debug Info</summary>
         <pre id="debugInfo"></pre>
-      </section>
-    </div>
+      </details>
 
+    </div>
     <script src="panel.js"></script>
+    <script src="panel-actions.js"></script>
+    <script src="panel-license.js"></script>
   </body>
 </html>

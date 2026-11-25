@@ -1,5 +1,11 @@
 # Email Copilot MVP
 
+## DeepSeek 请求记录
+
+后台在发起 DeepSeek 请求前，将完整请求正文保存到 `backend/.cache/deepseek-requests/`，包括系统提示词、已送入的邮件／订单信息、检索知识及对话消息。每次发送尝试有独立的时间戳文件，`latest.json` 为最新一次。Authorization 中的 API 密钥以 `[REDACTED]` 代替。
+
+记录功能不改变提示词、模型参数或回复处理。文件包含实际工单内容，仅保存在本机，已由 `.gitignore` 排除。需要停止记录时，在 `.env` 设置 `DEEPSEEK_REQUEST_LOG=0` 后重启后台。
+
 This folder now contains:
 
 - Product and planning docs
